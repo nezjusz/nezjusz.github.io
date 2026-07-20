@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>New Tab</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div class="container">
+  
+  <!-- Settings button -->
+  <div class="settings-wrapper">
+    <button id="settingsBtn" class="settings-btn">
+      <svg class="settings-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="3"></circle>
+        <path d="M12 1v6"></path>
+        <path d="M12 17v6"></path>
+        <path d="M4.22 4.22l4.24 4.24"></path>
+        <path d="M15.54 15.54l4.24 4.24"></path>
+        <path d="M1 12h6"></path>
+        <path d="M17 12h6"></path>
+        <path d="M4.22 19.78l4.24-4.24"></path>
+        <path d="M15.54 8.46l4.24-4.24"></path>
+      </svg>
+    </button>
+  </div>
+
+  <!-- Settings modal -->
+  <div id="settingsModal" class="modal-overlay">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 class="modal-title">Search engine</h2>
+        <button id="closeSettings" class="close-btn">×</button>
+      </div>
+      <div class="radio-group">
+        <label class="radio-label">
+          <input type="radio" name="searchEngine" value="google" class="radio-input" />
+          <span class="radio-text">Google</span>
+        </label>
+        <label class="radio-label">
+          <input type="radio" name="searchEngine" value="bing" class="radio-input" />
+          <span class="radio-text">Bing</span>
+        </label>
+        <label class="radio-label">
+          <input type="radio" name="searchEngine" value="duckduckgo" class="radio-input" />
+          <span class="radio-text">DuckDuckGo</span>
+        </label>
+        <label class="radio-label">
+          <input type="radio" name="searchEngine" value="ecosia" class="radio-input" />
+          <span class="radio-text">Ecosia</span>
+        </label>
+      </div>
+    </div>
+  </div>
+
+  <div class="main-content">
+    
+    <!-- Greeting and time -->
+    <div class="header">
+      <p id="greeting" class="greeting">Good morning</p>
+      <h1 id="time" class="time">9:30</h1>
+    </div>
+
+    <!-- Search box -->
+    <div class="search-box">
+      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="11" cy="11" r="8"></circle>
+        <path d="m21 21-4.35-4.35"></path>
+      </svg>
+      <input type="text" id="search" class="search-input" placeholder="Search the web..." autofocus />
+    </div>
+
+    <!-- Quick links section -->
+    <div class="quick-links">
+      <p class="quick-links-title">Quick access</p>
+      <div class="links-grid">
+        <a href="https://github.com" class="link-card">
+          <svg class="link-icon" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
+          </svg>
+          <span class="link-text">GitHub</span>
+        </a>
+        <a href="https://mail.google.com" class="link-card">
+          <svg class="link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="2" y="4" width="20" height="16" rx="2"></rect>
+            <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"></path>
+          </svg>
+          <span class="link-text">Gmail</span>
+        </a>
+        <a href="https://youtube.com" class="link-card">
+          <svg class="link-icon" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+          </svg>
+          <span class="link-text">YouTube</span>
+        </a>
+        <a href="https://reddit.com" class="link-card">
+          <svg class="link-icon" viewBox="0 0 24 24" fill="currentColor">
+            <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2"/><path d="M7.5 9.5c.83-1.37 2.45-2.5 4.5-2.5s3.67 1.13 4.5 2.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="9" cy="9" r="1" fill="currentColor"/><circle cx="15" cy="9" r="1" fill="currentColor"/>
+          </svg>
+          <span class="link-text">Reddit</span>
+        </a>
+      </div>
+    </div>
+
+    <!-- Footer stats -->
+    <div class="footer">
+      <div>
+        <p id="date">Monday, July 21</p>
+      </div>
+      <div>
+        <p id="day-name">Week 30</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const searchEngines = {
+  google: 'https://www.google.com/search?q=',
+  bing: 'https://www.bing.com/search?q=',
+  duckduckgo: 'https://duckduckgo.com/?q=',
+  ecosia: 'https://www.ecosia.org/search?q='
+};
+
+function updateTime() {
+  const now = new Date();
+  const hours = now.getHours();
+  const minutes = String(now.getMinutes()).padStart(2, '0');
+  document.getElementById('time').textContent = `${hours}:${minutes}`;
+
+  let greeting = 'Good morning';
+  if (hours >= 12 && hours < 17) greeting = 'Good afternoon';
+  if (hours >= 17) greeting = 'Good evening';
+  if (hours < 5) greeting = 'Late night';
+  document.getElementById('greeting').textContent = greeting;
+
+  const options = { weekday: 'long', month: 'short', day: 'numeric' };
+  document.getElementById('date').textContent = now.toLocaleDateString('en-US', options);
+
+  const firstDayOfYear = new Date(now.getFullYear(), 0, 1);
+  const pastDaysOfYear = (now - firstDayOfYear) / 86400000;
+  const week = Math.ceil((pastDaysOfYear + firstDayOfYear.getDay() + 1) / 7);
+  document.getElementById('day-name').textContent = `Week ${week}`;
+}
+
+// Load saved search engine
+const savedEngine = localStorage.getItem('searchEngine') || 'google';
+document.querySelector(`input[value="${savedEngine}"]`).checked = true;
+
+// Settings modal
+document.getElementById('settingsBtn').addEventListener('click', () => {
+  document.getElementById('settingsModal').style.display = 'flex';
+});
+
+document.getElementById('closeSettings').addEventListener('click', () => {
+  document.getElementById('settingsModal').style.display = 'none';
+});
+
+document.getElementById('settingsModal').addEventListener('click', (e) => {
+  if (e.target === document.getElementById('settingsModal')) {
+    document.getElementById('settingsModal').style.display = 'none';
+  }
+});
+
+// Save search engine selection
+document.querySelectorAll('input[name="searchEngine"]').forEach(radio => {
+  radio.addEventListener('change', (e) => {
+    localStorage.setItem('searchEngine', e.target.value);
+  });
+});
+
+// Search functionality
+document.getElementById('search').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') {
+    const query = this.value;
+    if (query) {
+      const engine = localStorage.getItem('searchEngine') || 'google';
+      const url = searchEngines[engine] + encodeURIComponent(query);
+      window.location.href = url;
+    }
+  }
+});
+
+updateTime();
+setInterval(updateTime, 1000);
+</script>
+
+</body>
+</html>

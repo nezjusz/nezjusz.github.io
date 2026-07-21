@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Projects</title>
+    <style>
+        :root {
+            --bg-color: #f0f2f5;
+            --text-color: #1a1a1a;
+            --card-bg: #ffffff;
+            --accent-color: #0056b3;
+        }
+
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 50px 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            margin-bottom: 40px;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+            color: #333;
+        }
+
+        ul {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+            width: 100%;
+            max-width: 900px;
+        }
+
+        a {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-color: var(--card-bg);
+            color: var(--text-color);
+            text-decoration: none;
+            font-size: 1.2rem;
+            font-weight: 600;
+            padding: 40px 20px;
+            border-radius: 16px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05), 0 1px 3px rgba(0, 0, 0, 0.1);
+            transition: all 0.3s ease;
+            border: 2px solid transparent;
+        }
+
+        a:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 12px 20px rgba(0, 0, 0, 0.1);
+            color: var(--accent-color);
+            border-color: rgba(0, 86, 179, 0.1);
+        }
+    </style>
+</head>
+<body>
+
+    <h1>My Projects</h1>
+    
+    <ul id="project-list">
+        <!-- Linki załadują się tutaj z pliku JSON -->
+    </ul>
+
+    <script>
+        fetch('pages.json')
+            .then(response => response.json())
+            .then(data => {
+                const list = document.getElementById('project-list');
+                data.forEach(page => {
+                    const li = document.createElement('li');
+                    const a = document.createElement('a');
+                    a.href = page.url;
+                    a.textContent = page.name;
+                    li.appendChild(a);
+                    list.appendChild(li);
+                });
+            })
+            .catch(error => console.error('Błąd ładowania pliku pages.json:', error));
+    </script>
+
+</body>
+</html>

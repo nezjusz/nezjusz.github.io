@@ -287,9 +287,10 @@
                     '-profile:v', 'high',
                     '-level', '4.0',
                     '-pix_fmt', 'yuv420p',
+                    '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2', // <-- DODAJ TO
                     '-b:a', `${audioBitrateK}k`,
                     '-c:a', 'aac',
-                    '-movflags', '+faststart', // Smooth web streaming delivery layout structural alignment
+                    '-movflags', '+faststart',
                     outputName
                 );
 

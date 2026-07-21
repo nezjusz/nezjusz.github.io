@@ -10,5 +10,9 @@
     {
         "name": "Spotify Wrapped",
         "url": "./spotifydatapackage/"
+    },
+    {
+        "name": "Video Compression Tool",
+        "url": "./8mbvidcompress/"
     }
 ]

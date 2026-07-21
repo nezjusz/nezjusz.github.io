@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SleekCompress // In-Browser Video Compressor</title>
+    <!-- Tailwind CSS for beautiful styling -->
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <!-- Font -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Local FFmpeg script -->
+    <script src="./ffmpeg.min.js"></script>
+    <style>
+        body { font-family: 'Plus Jakarta Sans', sans-serif; }
+        .glass {
+            background: rgba(255, 255, 255, 0.03);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+    </style>
+</head>
+<body class="bg-[#0b0f19] text-gray-100 min-h-screen flex flex-col justify-between selection:bg-indigo-500 selection:text-white antialiased overflow-x-hidden">
+
+    <!-- Ambient Background Glows -->
+    <div class="absolute top-0 left-1/4 w-96 h-96 bg-indigo-600/10 rounded-full blur-[120px] -z-10"></div>
+    <div class="absolute bottom-0 right-1/4 w-96 h-96 bg-emerald-600/10 rounded-full blur-[120px] -z-10"></div>
+
+    <!-- Header -->
+    <header class="px-6 py-6 max-w-5xl w-full mx-auto flex justify-between items-center">
+        <div class="flex items-center gap-2">
+            <div class="h-8 w-8 rounded-lg bg-gradient-to-tr from-indigo-500 to-emerald-400 flex items-center justify-center font-bold text-slate-900">8</div>
+            <span class="text-lg font-bold tracking-tight bg-gradient-to-r from-white to-gray-400 bg-clip-text text-transparent">8mb.browser</span>
+        </div>
+        <div id="loadingStatus" class="text-xs font-medium px-3 py-1.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+            Initializing FFmpeg Core...
+        </div>
+    </header>
+
+    <!-- Main Workspace -->
+    <main class="max-w-xl w-full mx-auto px-4 py-8 flex-grow flex flex-col justify-center">
+        <div class="glass rounded-3xl p-6 sm:p-8 shadow-2xl relative overflow-hidden">
+            
+            <!-- Step 1: Upload (Visible Initially) -->
+            <div id="uploadView" class="space-y-6">
+                <div class="text-center space-y-2">
+                    <h1 class="text-2xl font-bold tracking-tight text-white">Compress Video instantly</h1>
+                    <p class="text-sm text-gray-400">100% private. Runs entirely inside your browser tab.</p>
+                </div>
+
+                <!-- Drop Zone -->
+                <div id="dropZone" class="border-2 border-dashed border-gray-700 hover:border-indigo-500/50 rounded-2xl p-8 text-center cursor-pointer transition-all bg-gray-900/20 hover:bg-gray-900/40 group relative">
+                    <input type="file" id="fileInput" accept="video/*" class="hidden">
+                    <div class="space-y-4 pointer-events-none">
+                        <div class="w-12 h-12 rounded-xl bg-gray-800/80 flex items-center justify-center mx-auto group-hover:scale-110 transition-transform text-gray-400 group-hover:text-indigo-400">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M12 16.5V9.75m0 0l3 3m-3-3l-3 3M6.75 19.5a4.5 4.5 0 01-1.41-8.775 5.25 5.25 0 0110.233-2.33 3 3 0 013.758 3.848A3.752 3.752 0 0118 19.5H6.75z" />
+                            </svg>
+                        </div>
+                        <div class="space-y-1">
+                            <p class="text-sm font-medium text-gray-200">Drag & drop your video here, or <span class="text-indigo-400 group-hover:underline">browse</span></p>
+                            <p class="text-xs text-gray-500">Supports MP4, MOV, MKV, WebM etc.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 2: Options & Processing (Hidden Initially) -->
+            <div id="processView" class="hidden space-y-6">
+                <!-- Video Metadata Card -->
+                <div class="flex items-center gap-4 p-4 rounded-xl bg-gray-900/40 border border-gray-800">
+                    <div class="p-3 bg-indigo-500/10 rounded-xl text-indigo-400">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25h-9A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z" />
+                        </svg>
+                    </div>
+                    <div class="overflow-hidden flex-grow">
+                        <p id="fileName" class="text-sm font-medium truncate text-white">video.mp4</p>
+                        <p id="fileDetails" class="text-xs text-gray-400">0.0 MB • 0:00s</p>
+                    </div>
+                    <button id="resetBtn" class="text-xs text-gray-500 hover:text-white transition-colors cursor-pointer">Change</button>
+                </div>
+
+                <!-- Size Selector Options -->
+                <div id="sizeControls" class="space-y-3">
+                    <label class="text-xs font-semibold uppercase tracking-wider text-gray-400">Target File Size</label>
+                    <div class="grid grid-cols-4 gap-3">
+                        <button data-size="8" class="size-opt py-3 rounded-xl border border-gray-800 bg-gray-900/20 text-sm font-medium hover:border-indigo-500/50 transition-all cursor-pointer text-center text-white active">8 MB</button>
+                        <button data-size="10" class="size-opt py-3 rounded-xl border border-gray-800 bg-gray-900/20 text-sm font-medium hover:border-indigo-500/50 transition-all cursor-pointer text-center text-white">10 MB</button>
+                        <button data-size="20" class="size-opt py-3 rounded-xl border border-gray-800 bg-gray-900/20 text-sm font-medium hover:border-indigo-500/50 transition-all cursor-pointer text-center text-white">20 MB</button>
+                        <button data-size="50" class="size-opt py-3 rounded-xl border border-gray-800 bg-gray-900/20 text-sm font-medium hover:border-indigo-500/50 transition-all cursor-pointer text-center text-white">50 MB</button>
+                    </div>
+                </div>
+
+                <!-- Progress Section -->
+                <div id="progressContainer" class="hidden space-y-3 bg-gray-900/30 p-4 rounded-xl border border-gray-800/60">
+                    <div class="flex justify-between items-center text-xs">
+                        <span id="progressText" class="font-medium text-indigo-400">Processing video...</span>
+                        <span id="progressPercent" class="font-bold text-white">0%</span>
+                    </div>
+                    <div class="w-full bg-gray-800 h-2 rounded-full overflow-hidden">
+                        <div id="progressBar" class="bg-gradient-to-r from-indigo-500 to-emerald-400 h-full w-0 transition-all duration-200"></div>
+                    </div>
+                </div>
+
+                <!-- Primary Action Buttons -->
+                <button id="compressBtn" class="w-full py-4 bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 text-white rounded-xl font-medium shadow-lg shadow-indigo-500/20 transition-all transform active:scale-[0.99] flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
+                    Compress Video
+                </button>
+                
+                <a id="downloadBtn" class="hidden w-full py-4 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white rounded-xl font-medium shadow-lg shadow-emerald-500/20 text-center transition-all transform active:scale-[0.99] flex items-center justify-center gap-2 cursor-pointer">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                    </svg>
+                    Download Compressed Video
+                </a>
+            </div>
+
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="text-center py-6 text-xs text-gray-500 max-w-xl mx-auto w-full border-t border-gray-950/40">
+        Powered locally by FFmpeg.wasm. No data ever leaves your computer.
+    </footer>
+
+    <!-- Application Script -->
+    <script>
+        const { createFFmpeg, fetchFile } = FFmpeg;
+        
+        // Pointing directly to the sister files next to index.html
+        const ffmpeg = createFFmpeg({
+            corePath: './ffmpeg-core.js',
+            log: true
+        });
+
+        // DOM elements
+        const loadingStatus = document.getElementById('loadingStatus');
+        const uploadView = document.getElementById('uploadView');
+        const processView = document.getElementById('processView');
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+        const fileNameText = document.getElementById('fileName');
+        const fileDetailsText = document.getElementById('fileDetails');
+        const resetBtn = document.getElementById('resetBtn');
+        const sizeButtons = document.querySelectorAll('.size-opt');
+        const compressBtn = document.getElementById('compressBtn');
+        const downloadBtn = document.getElementById('downloadBtn');
+        const progressContainer = document.getElementById('progressContainer');
+        const progressBar = document.getElementById('progressBar');
+        const progressPercent = document.getElementById('progressPercent');
+        const progressText = document.getElementById('progressText');
+
+        let selectedFile = null;
+        let selectedTargetSizeMB = 8;
+        let videoDurationSec = 0;
+
+        // Load FFmpeg core immediately
+        async function initFFmpeg() {
+            try {
+                await ffmpeg.load();
+                loadingStatus.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-400"></span> Engine Ready`;
+                loadingStatus.className = "text-xs font-medium px-3 py-1.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-2";
+            } catch (error) {
+                console.error(error);
+                loadingStatus.innerText = "Failed to load local FFmpeg core assets.";
+                loadingStatus.className = "text-xs font-medium px-3 py-1.5 rounded-full bg-red-500/10 text-red-400 border border-red-500/20";
+            }
+        }
+        initFFmpeg();
+
+        // Wire Up Drag and Drop
+        dropZone.addEventListener('click', () => fileInput.click());
+        dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('border-indigo-500', 'bg-gray-900/40'); });
+        dropZone.addEventListener('dragleave', () => { dropZone.classList.remove('border-indigo-500', 'bg-gray-900/40'); });
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('border-indigo-500', 'bg-gray-900/40');
+            if (e.dataTransfer.files.length > 0) handleFileSelection(e.dataTransfer.files[0]);
+        });
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) handleFileSelection(e.target.files[0]);
+        });
+
+        function handleFileSelection(file) {
+            if (!file.type.startsWith('video/')) {
+                alert('Please select a valid video file.');
+                return;
+            }
+            selectedFile = file;
+            
+            // Extract accurate duration via structural browser component
+            const videoEl = document.createElement('video');
+            videoEl.preload = 'metadata';
+            videoEl.src = URL.createObjectURL(file);
+            videoEl.onloadedmetadata = () => {
+                videoDurationSec = videoEl.duration;
+                fileDetailsText.innerText = `${(file.size / (1024 * 1024)).toFixed(1)} MB • ${Math.floor(videoDurationSec / 60)}m ${Math.floor(videoDurationSec % 60)}s`;
+                URL.revokeObjectURL(videoEl.src);
+            };
+
+            fileNameText.innerText = file.name;
+            uploadView.classList.add('hidden');
+            processView.classList.remove('hidden');
+            
+            // Reset state
+            downloadBtn.classList.add('hidden');
+            compressBtn.classList.remove('hidden');
+            progressContainer.classList.add('hidden');
+            document.getElementById('sizeControls').classList.remove('opacity-40', 'pointer-events-none');
+        }
+
+        resetBtn.addEventListener('click', () => {
+            selectedFile = null;
+            fileInput.value = '';
+            processView.classList.add('hidden');
+            uploadView.classList.remove('hidden');
+        });
+
+        // Size Target Selection Logic
+        sizeButtons.forEach(btn => {
+            btn.addEventListener('click', () => {
+                sizeButtons.forEach(b => {
+                    b.classList.remove('border-indigo-500', 'bg-indigo-500/10');
+                    b.classList.add('border-gray-800', 'bg-gray-900/20');
+                });
+                btn.classList.remove('border-gray-800', 'bg-gray-900/20');
+                btn.classList.add('border-indigo-500', 'bg-indigo-500/10');
+                selectedTargetSizeMB = parseInt(btn.dataset.size);
+            });
+        });
+
+        // Compression Engine Integration
+        compressBtn.addEventListener('click', async () => {
+            if (!ffmpeg.isLoaded()) {
+                alert('FFmpeg engine is still initializing. Please wait.');
+                return;
+            }
+            if (!selectedFile || videoDurationSec === 0) return;
+
+            // UI adjustments
+            compressBtn.disabled = true;
+            document.getElementById('sizeControls').classList.add('opacity-40', 'pointer-events-none');
+            progressContainer.classList.remove('hidden');
+            progressBar.style.width = '0%';
+            progressPercent.innerText = '0%';
+
+            const inputName = 'input_' + selectedFile.name;
+            const outputName = 'compressed_output.mp4';
+
+            // Track operational status logs to parse target time progress natively
+            ffmpeg.setProgress(({ ratio }) => {
+                const percentage = Math.min(Math.max(Math.round(ratio * 100), 0), 100);
+                progressBar.style.width = `${percentage}%`;
+                progressPercent.innerText = `${percentage}%`;
+                if(percentage === 100) {
+                    progressText.innerText = "Wrapping up calculations...";
+                } else {
+                    progressText.innerText = "Compressing dynamic layers...";
+                }
+            });
+
+            // Calculate operational requirements
+            // Target size in bits minus a small 3% buffer margin for container overhead wrappers
+            const targetSizeBits = (selectedTargetSizeMB * 1024 * 1024 * 8) * 0.97;
+            const audioBitrateK = 128; // Standard fallback allocation
+            const totalTargetBitrateK = Math.floor(targetSizeBits / videoDurationSec / 1000);
+            let videoBitrateK = totalTargetBitrateK - audioBitrateK;
+
+            // Safeguard bounds
+            if (videoBitrateK < 64) {
+                videoBitrateK = Math.floor(totalTargetBitrateK * 0.85);
+            }
+
+            // Write target file buffer directly to browser virtual file system memory
+            ffmpeg.FS('writeFile', inputName, await fetchFile(selectedFile));
+
+            try {
+                // Execute standard highly compatible single-pass scaling operation setup
+                await ffmpeg.run(
+                    '-i', inputName,
+                    '-b:v', `${videoBitrateK}k`,
+                    '-c:v', 'libx264',
+                    '-profile:v', 'high',
+                    '-level', '4.0',
+                    '-pix_fmt', 'yuv420p',
+                    '-b:a', `${audioBitrateK}k`,
+                    '-c:a', 'aac',
+                    '-movflags', '+faststart', // Smooth web streaming delivery layout structural alignment
+                    outputName
+                );
+
+                // Read structural compressed outputs directly from memory block allocations
+                const data = ffmpeg.FS('readFile', outputName);
+                const compressedBlob = new Blob([data.buffer], { type: 'video/mp4' });
+                const downloadUrl = URL.createObjectURL(compressedBlob);
+
+                // Configure modern downscaling download link targets natively
+                downloadBtn.href = downloadUrl;
+                downloadBtn.download = `compressed_${selectedTargetSizeMB}MB_${selectedFile.name.replace(/\.[^/.]+$/, "")}.mp4`;
+                
+                // Swap state representation actions dynamically
+                compressBtn.classList.add('hidden');
+                compressBtn.disabled = false;
+                downloadBtn.classList.remove('hidden');
+                progressText.innerText = "Compression successfully finished!";
+            } catch (err) {
+                console.error(err);
+                alert('An operational issue happened within FFmpeg calculations.');
+                compressBtn.disabled = false;
+            } finally {
+                // Clean browser memory spaces to prevent tab runtime crashes
+                try {
+                    ffmpeg.FS('unlink', inputName);
+                    ffmpeg.FS('unlink', outputName);
+                } catch(e){}
+            }
+        });
+    </script>
+</body>
+</html>

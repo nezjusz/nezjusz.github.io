@@ -133,7 +133,7 @@
         
         // Pointing directly to the sister files next to index.html
         const ffmpeg = createFFmpeg({
-            corePath: './ffmpeg-core.js',
+            corePath: new URL('ffmpeg-core.js', document.location.href).href,
             log: true
         });
 

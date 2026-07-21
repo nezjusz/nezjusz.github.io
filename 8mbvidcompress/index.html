@@ -119,6 +119,38 @@
         .size-opt.is-selected { border-color: var(--amber); background: var(--amber-dim); }
         .size-opt.is-selected .meter-fill { background: var(--amber); }
         .size-opt.is-selected .meter-label { color: var(--amber); }
+        .size-opt.is-selected .meter-icon { color: var(--amber); }
+
+        .meter-icon { color: var(--text-dim); transition: color 0.15s ease; }
+
+        /* Custom target size input, revealed under the meter row */
+        .custom-size-row input {
+            background: var(--bg-alt);
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            color: var(--text);
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            padding: 0.55rem 0.7rem;
+            width: 100%;
+        }
+        .custom-size-row input::placeholder { color: var(--text-dim); }
+        .custom-size-row input:focus { border-color: var(--amber); outline: none; }
+
+        /* Size / duration warning banner */
+        .warn-banner {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.65rem;
+            padding: 0.75rem 0.9rem;
+            border-radius: 8px;
+            font-size: 0.78rem;
+            line-height: 1.4;
+            background: rgba(255, 180, 84, 0.09);
+            border: 1px solid rgba(255, 180, 84, 0.3);
+            color: var(--text);
+        }
+        .warn-banner svg { color: var(--amber); flex-shrink: 0; margin-top: 1px; }
 
         /* Progress meter styled like a ladder of bitrate ticks rather than a plain gradient bar */
         .tick-track {
@@ -230,10 +262,18 @@
                     <button id="resetBtn" class="text-xs mono transition-colors cursor-pointer" style="color:var(--text-dim)">CHANGE</button>
                 </div>
 
+                <!-- Large file / long clip warning -->
+                <div id="sizeWarning" class="warn-banner hidden">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.75" stroke="currentColor" class="w-4 h-4">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m0 3.75h.008v.008H12v-.008ZM21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                    </svg>
+                    <p id="sizeWarningText"></p>
+                </div>
+
                 <!-- Size Selector Options -->
                 <div id="sizeControls" class="space-y-3">
                     <label class="text-xs font-semibold uppercase tracking-wider mono" style="color:var(--text-dim)">Target size</label>
-                    <div class="grid grid-cols-4 gap-3">
+                    <div class="grid grid-cols-5 gap-2">
                         <button data-size="8" class="size-opt is-selected">
                             <span class="meter-track"><span class="meter-fill" style="height:30%"></span></span>
                             <span class="meter-label">8 MB</span>
@@ -250,6 +290,18 @@
                             <span class="meter-track"><span class="meter-fill" style="height:100%"></span></span>
                             <span class="meter-label">50 MB</span>
                         </button>
+                        <button data-size="custom" id="customSizeBtn" class="size-opt">
+                            <span class="meter-track items-center justify-center">
+                                <svg class="meter-icon w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.75" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L6.832 19.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.863 4.487Z" />
+                                </svg>
+                            </span>
+                            <span class="meter-label">Custom</span>
+                        </button>
+                    </div>
+                    <div id="customSizeRow" class="custom-size-row hidden flex items-center gap-2">
+                        <input type="number" id="customSizeInput" min="1" max="2000" step="1" placeholder="Target size" inputmode="numeric">
+                        <span class="mono text-xs" style="color:var(--text-dim)">MB</span>
                     </div>
                 </div>
 
@@ -306,6 +358,11 @@
         const resetBtn = document.getElementById('resetBtn');
         const sizeButtons = document.querySelectorAll('.size-opt');
         const sizeControls = document.getElementById('sizeControls');
+        const customSizeBtn = document.getElementById('customSizeBtn');
+        const customSizeRow = document.getElementById('customSizeRow');
+        const customSizeInput = document.getElementById('customSizeInput');
+        const sizeWarning = document.getElementById('sizeWarning');
+        const sizeWarningText = document.getElementById('sizeWarningText');
         const compressBtn = document.getElementById('compressBtn');
         const downloadBtn = document.getElementById('downloadBtn');
         const progressContainer = document.getElementById('progressContainer');
@@ -316,6 +373,29 @@
         let selectedFile = null;
         let selectedTargetSizeMB = 8;
         let videoDurationSec = 0;
+
+        const LARGE_FILE_BYTES = 500 * 1024 * 1024; // 500 MB
+        const LONG_CLIP_SECONDS = 5 * 60; // 5 minutes
+
+        // Shows or hides the large-file / long-clip warning for the given file + duration
+        function updateSizeWarning(file, durationSec) {
+            const isLarge = file.size > LARGE_FILE_BYTES;
+            const isLong = durationSec > LONG_CLIP_SECONDS;
+
+            if (!isLarge && !isLong) {
+                sizeWarning.classList.add('hidden');
+                return;
+            }
+
+            if (isLarge && isLong) {
+                sizeWarningText.innerText = 'This file is over 500 MB and longer than 5 minutes. In-browser compression may be slow or run out of memory on this device.';
+            } else if (isLarge) {
+                sizeWarningText.innerText = 'This file is over 500 MB. In-browser compression may be slow or run out of memory on this device.';
+            } else {
+                sizeWarningText.innerText = 'This clip is longer than 5 minutes. In-browser compression may take a while.';
+            }
+            sizeWarning.classList.remove('hidden');
+        }
 
         // Load the FFmpeg core as soon as the page opens
         async function initFFmpeg() {
@@ -358,6 +438,7 @@
             videoEl.onloadedmetadata = () => {
                 videoDurationSec = videoEl.duration;
                 fileDetailsText.innerText = `${(file.size / (1024 * 1024)).toFixed(1)} MB · ${Math.floor(videoDurationSec / 60)}:${String(Math.floor(videoDurationSec % 60)).padStart(2, '0')}`;
+                updateSizeWarning(file, videoDurationSec);
                 URL.revokeObjectURL(videoEl.src);
             };
 
@@ -369,6 +450,7 @@
             downloadBtn.classList.add('hidden');
             compressBtn.classList.remove('hidden');
             progressContainer.classList.add('hidden');
+            sizeWarning.classList.add('hidden');
             sizeControls.classList.remove('opacity-40', 'pointer-events-none');
         }
 
@@ -379,13 +461,31 @@
             uploadView.classList.remove('hidden');
         });
 
-        // Target size selection
+        // Target size selection — preset buttons set the value directly;
+        // the custom button instead reveals an input for a specific size.
         sizeButtons.forEach(btn => {
             btn.addEventListener('click', () => {
                 sizeButtons.forEach(b => b.classList.remove('is-selected'));
                 btn.classList.add('is-selected');
-                selectedTargetSizeMB = parseInt(btn.dataset.size);
+
+                if (btn.dataset.size === 'custom') {
+                    customSizeRow.classList.remove('hidden');
+                    customSizeInput.focus();
+                    if (customSizeInput.value) {
+                        selectedTargetSizeMB = parseInt(customSizeInput.value);
+                    }
+                } else {
+                    customSizeRow.classList.add('hidden');
+                    selectedTargetSizeMB = parseInt(btn.dataset.size);
+                }
             });
+        });
+
+        customSizeInput.addEventListener('input', () => {
+            const value = parseInt(customSizeInput.value);
+            if (value > 0) {
+                selectedTargetSizeMB = value;
+            }
         });
 
         // Compression
@@ -395,6 +495,11 @@
                 return;
             }
             if (!selectedFile || videoDurationSec === 0) return;
+            if (customSizeBtn.classList.contains('is-selected') && !(parseInt(customSizeInput.value) > 0)) {
+                alert('Enter a target size in MB first.');
+                customSizeInput.focus();
+                return;
+            }
 
             compressBtn.disabled = true;
             sizeControls.classList.add('opacity-40', 'pointer-events-none');

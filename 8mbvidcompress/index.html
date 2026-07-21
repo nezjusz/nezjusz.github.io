@@ -377,10 +377,12 @@
         const LARGE_FILE_BYTES = 500 * 1024 * 1024; // 500 MB
         const LONG_CLIP_SECONDS = 5 * 60; // 5 minutes
 
-        // Shows or hides the large-file / long-clip warning for the given file + duration
+        // Shows or hides the large-file / long-clip warning. durationSec is
+        // optional — called once immediately with just the file size, then
+        // again once the clip's duration has loaded.
         function updateSizeWarning(file, durationSec) {
             const isLarge = file.size > LARGE_FILE_BYTES;
-            const isLong = durationSec > LONG_CLIP_SECONDS;
+            const isLong = typeof durationSec === 'number' && durationSec > LONG_CLIP_SECONDS;
 
             if (!isLarge && !isLong) {
                 sizeWarning.classList.add('hidden');
@@ -430,6 +432,11 @@
                 return;
             }
             selectedFile = file;
+            videoDurationSec = 0;
+
+            // Size is known immediately — check it before duration loads,
+            // so the warning (or its absence) reflects the new file right away.
+            updateSizeWarning(file);
 
             // Read duration via a throwaway <video> element
             const videoEl = document.createElement('video');
@@ -438,6 +445,8 @@
             videoEl.onloadedmetadata = () => {
                 videoDurationSec = videoEl.duration;
                 fileDetailsText.innerText = `${(file.size / (1024 * 1024)).toFixed(1)} MB · ${Math.floor(videoDurationSec / 60)}:${String(Math.floor(videoDurationSec % 60)).padStart(2, '0')}`;
+                // Recheck now that duration is available, in case the clip
+                // is long even though the file size alone was fine.
                 updateSizeWarning(file, videoDurationSec);
                 URL.revokeObjectURL(videoEl.src);
             };
@@ -450,13 +459,14 @@
             downloadBtn.classList.add('hidden');
             compressBtn.classList.remove('hidden');
             progressContainer.classList.add('hidden');
-            sizeWarning.classList.add('hidden');
             sizeControls.classList.remove('opacity-40', 'pointer-events-none');
         }
 
         resetBtn.addEventListener('click', () => {
             selectedFile = null;
+            videoDurationSec = 0;
             fileInput.value = '';
+            sizeWarning.classList.add('hidden');
             processView.classList.add('hidden');
             uploadView.classList.remove('hidden');
         });

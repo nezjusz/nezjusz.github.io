@@ -137,11 +137,8 @@
         .custom-size-row input::placeholder { color: var(--text-dim); }
         .custom-size-row input:focus { border-color: var(--amber); outline: none; }
 
-        /* Size / duration warning banner */
+        /* Size / duration warning banner (layout classes applied via Tailwind on the element) */
         .warn-banner {
-            display: flex;
-            align-items: flex-start;
-            gap: 0.65rem;
             padding: 0.75rem 0.9rem;
             border-radius: 8px;
             font-size: 0.78rem;
@@ -263,7 +260,7 @@
                 </div>
 
                 <!-- Large file / long clip warning -->
-                <div id="sizeWarning" class="warn-banner hidden">
+                <div id="sizeWarning" class="warn-banner hidden flex items-start gap-3">
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.75" stroke="currentColor" class="w-4 h-4">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m0 3.75h.008v.008H12v-.008ZM21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
                     </svg>

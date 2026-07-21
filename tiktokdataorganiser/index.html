@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TikTok Export Organizer</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+  :root{
+    --bg: #0b0d10;
+    --panel: #14171c;
+    --panel-border: #262b33;
+    --text: #e8eaed;
+    --muted: #8b93a1;
+    --accent: #2dd4bf;
+    --accent-dim: #1a5c54;
+    --warn: #f0a35c;
+    --mono: 'SF Mono', 'Consolas', 'Menlo', monospace;
+  }
+  *{ box-sizing: border-box; }
+  html,body{
+    margin:0; padding:0; background:var(--bg); color:var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    min-height:100vh;
+  }
+  .wrap{ max-width: 760px; margin: 0 auto; padding: 48px 24px 80px; }
+  .eyebrow{
+    font-family: var(--mono); font-size: 12px; letter-spacing: 0.12em;
+    color: var(--accent); text-transform: uppercase; margin-bottom: 10px;
+  }
+  h1{ font-size: 32px; line-height:1.15; margin: 0 0 12px; font-weight: 650; }
+  .sub{ color: var(--muted); font-size: 15px; line-height:1.6; margin-bottom: 36px; max-width: 58ch; }
+
+  .card{
+    background: var(--panel); border: 1px solid var(--panel-border);
+    border-radius: 14px; padding: 28px; margin-bottom: 20px;
+  }
+  .card h2{ font-size: 14px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin:0 0 16px; font-weight: 600;}
+
+  .drop{
+    border: 1.5px dashed var(--panel-border); border-radius: 10px;
+    padding: 36px 20px; text-align:center; cursor:pointer;
+    transition: border-color .15s ease, background .15s ease;
+  }
+  .drop:hover, .drop.drag{ border-color: var(--accent); background: rgba(45,212,191,0.05); }
+  .drop input{ display:none; }
+  .drop .icon{ font-size: 28px; margin-bottom: 10px; opacity:.8; }
+  .drop .primary{ font-size: 15px; margin-bottom: 4px; }
+  .drop .secondary{ font-size: 13px; color: var(--muted); }
+  .filename{ font-family: var(--mono); font-size: 13px; color: var(--accent); margin-top: 14px; word-break: break-all; }
+
+  button.go{
+    width:100%; margin-top: 18px; padding: 14px 18px; border-radius: 10px; border: none;
+    background: var(--accent); color: #06201c; font-weight: 700; font-size: 15px;
+    cursor: pointer; transition: filter .15s ease, transform .05s ease;
+    letter-spacing: .01em;
+  }
+  button.go:disabled{ background: #2a3138; color: #6b7280; cursor: not-allowed; }
+  button.go:not(:disabled):hover{ filter: brightness(1.08); }
+  button.go:not(:disabled):active{ transform: scale(0.996); }
+
+  .log{
+    font-family: var(--mono); font-size: 12.5px; color: var(--muted);
+    background: #0f1216; border: 1px solid var(--panel-border); border-radius: 8px;
+    padding: 14px 16px; max-height: 220px; overflow-y:auto; margin-top: 16px;
+    display:none; white-space: pre-wrap; line-height: 1.7;
+  }
+  .log.show{ display:block; }
+  .log .line{ }
+  .log .ok{ color: var(--accent); }
+  .log .warn{ color: var(--warn); }
+
+  .progress-outer{
+    height: 6px; background: #1c2127; border-radius: 4px; overflow:hidden; margin-top: 16px; display:none;
+  }
+  .progress-outer.show{ display:block; }
+  .progress-inner{ height:100%; width:0%; background: var(--accent); transition: width .12s ease; }
+
+  .summary{ display:none; }
+  .summary.show{ display:block; }
+  .stat-grid{
+    display:grid; grid-template-columns: repeat(auto-fill, minmax(150px,1fr)); gap: 10px; margin: 6px 0 4px;
+  }
+  .stat{
+    background: #0f1216; border: 1px solid var(--panel-border); border-radius: 8px;
+    padding: 12px 14px;
+  }
+  .stat .n{ font-family: var(--mono); font-size: 20px; color: var(--accent); font-weight: 700; }
+  .stat .l{ font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+  .download{
+    display:block; text-align:center; margin-top: 18px; padding: 14px 18px; border-radius: 10px;
+    background: transparent; border: 1.5px solid var(--accent); color: var(--accent);
+    font-weight: 700; text-decoration:none; font-size: 15px;
+  }
+  .download:hover{ background: rgba(45,212,191,0.08); }
+
+  .structure{
+    font-family: var(--mono); font-size: 12.5px; line-height: 1.85; color: var(--muted);
+    background: #0f1216; border: 1px solid var(--panel-border); border-radius: 8px; padding: 16px 18px;
+    margin-top: 6px; overflow-x:auto;
+  }
+  .structure .d{ color: var(--text); }
+  .structure .c{ color: var(--accent); }
+
+  .note{ font-size: 12.5px; color: var(--muted); margin-top: 14px; line-height:1.6; }
+  footer{ text-align:center; color: var(--panel-border); font-size:12px; margin-top: 40px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="eyebrow">TikTok data export</div>
+  <h1>Organize your export into a real folder structure</h1>
+  <p class="sub">
+    Drop in the JSON file from your TikTok data download (or the .zip it came in).
+    Everything gets sorted into labeled category folders, and every direct message
+    thread is pulled into its own separate folder — one file per person you've messaged,
+    plus group chats kept apart from 1:1 chats. Nothing leaves your browser: the file
+    is read and repackaged entirely on your machine.
+  </p>
+
+  <div class="card">
+    <h2>1 — Choose your file</h2>
+    <div class="drop" id="dropZone">
+      <div class="icon">⇪</div>
+      <div class="primary">Drop your <strong>user_data_tiktok.json</strong> or export .zip here</div>
+      <div class="secondary">or click to browse — .json or .zip</div>
+      <input type="file" id="fileInput" accept=".json,.zip,application/json,application/zip">
+      <div class="filename" id="fileName"></div>
+    </div>
+    <button class="go" id="goBtn" disabled>Select a file first</button>
+    <div class="progress-outer" id="progressOuter"><div class="progress-inner" id="progressInner"></div></div>
+    <div class="log" id="log"></div>
+  </div>
+
+  <div class="card summary" id="summaryCard">
+    <h2>2 — Done</h2>
+    <div class="stat-grid" id="statGrid"></div>
+    <a class="download" id="downloadLink" href="#" download="tiktok_data_organized.zip">Download organized_tiktok_data.zip</a>
+    <div class="note">The ZIP is built fresh each run and never uploaded anywhere — it's assembled in your browser's memory and handed straight to your downloads folder.</div>
+  </div>
+
+  <div class="card">
+    <h2>What you'll get</h2>
+    <div class="structure">
+<span class="d">organized_tiktok_data.zip</span>
+├── <span class="c">Direct Messages/</span>          <span style="opacity:.6">← fully separate from everything else</span>
+│   ├── Individual Chats/
+│   │   ├── username1.txt
+│   │   ├── username2.txt
+│   │   └── ...
+│   └── Group Chats/
+│       └── group_name.txt
+└── <span class="c">Categories/</span>
+    ├── Comment/
+    ├── Likes and Favorites/
+    ├── Post/
+    ├── Profile And Settings/
+    ├── Your Activity/
+    ├── TikTok Live/
+    ├── TikTok Shop/
+    ├── Income+ Wallet/
+    └── Location Review/
+    </div>
+    <div class="note">Category folders mirror whatever sections your export actually contains — empty sections are skipped. Each chat is converted into a plain, readable transcript sorted oldest → newest.</div>
+  </div>
+</div>
+<footer>Runs entirely client-side — your data is not sent anywhere.</footer>
+
+<script>
+const dropZone = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+const fileNameEl = document.getElementById('fileName');
+const goBtn = document.getElementById('goBtn');
+const logEl = document.getElementById('log');
+const progressOuter = document.getElementById('progressOuter');
+const progressInner = document.getElementById('progressInner');
+const summaryCard = document.getElementById('summaryCard');
+const statGrid = document.getElementById('statGrid');
+const downloadLink = document.getElementById('downloadLink');
+
+let selectedFile = null;
+
+dropZone.addEventListener('click', () => fileInput.click());
+['dragover','dragenter'].forEach(evt => dropZone.addEventListener(evt, e => {
+  e.preventDefault(); dropZone.classList.add('drag');
+}));
+['dragleave','drop'].forEach(evt => dropZone.addEventListener(evt, e => {
+  e.preventDefault(); dropZone.classList.remove('drag');
+}));
+dropZone.addEventListener('drop', e => {
+  if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+    setFile(e.dataTransfer.files[0]);
+  }
+});
+fileInput.addEventListener('change', () => {
+  if (fileInput.files[0]) setFile(fileInput.files[0]);
+});
+
+function setFile(f){
+  selectedFile = f;
+  fileNameEl.textContent = `${f.name}  (${(f.size/1024/1024).toFixed(1)} MB)`;
+  goBtn.disabled = false;
+  goBtn.textContent = 'Organize my data';
+  summaryCard.classList.remove('show');
+}
+
+function log(msg, cls){
+  logEl.classList.add('show');
+  const line = document.createElement('div');
+  line.className = 'line' + (cls ? ' ' + cls : '');
+  line.textContent = msg;
+  logEl.appendChild(line);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function setProgress(pct){
+  progressOuter.classList.add('show');
+  progressInner.style.width = Math.max(0, Math.min(100, pct)) + '%';
+}
+
+function sanitize(name){
+  return String(name)
+    .replace(/[:/\\?*"<>|]/g, '_')
+    .replace(/\s+$/,'')
+    .trim() || 'unnamed';
+}
+
+// Pull "Chat History with X:" -> "X", "Group Chat with Y:" -> "Y"
+function extractName(rawKey, prefix){
+  const m = rawKey.match(new RegExp('^' + prefix + ' with (.+?):?$'));
+  return m ? m[1] : rawKey;
+}
+
+function formatTranscript(messages, title){
+  const sorted = [...messages].sort((a,b) => {
+    const da = a.Date || a.date || '';
+    const db = b.Date || b.date || '';
+    return da < db ? -1 : da > db ? 1 : 0;
+  });
+  let out = `Conversation: ${title}\nMessages: ${sorted.length}\n${'-'.repeat(50)}\n\n`;
+  for (const m of sorted){
+    const date = m.Date || m.date || '(unknown date)';
+    const from = m.From || m.from || '(unknown sender)';
+    const content = (m.Content !== undefined ? m.Content : (m.content !== undefined ? m.content : JSON.stringify(m)));
+    out += `[${date}] ${from}: ${content}\n`;
+  }
+  return out;
+}
+
+async function readJsonFromFile(file){
+  if (file.name.toLowerCase().endsWith('.zip')){
+    log('Unzipping export archive…');
+    const inputZip = await JSZip.loadAsync(file);
+    let jsonEntry = null;
+    inputZip.forEach((path, entry) => {
+      if (!entry.dir && path.toLowerCase().endsWith('.json') && !jsonEntry){
+        jsonEntry = entry;
+      }
+    });
+    if (!jsonEntry) throw new Error('No .json file found inside the uploaded .zip');
+    log(`Found ${jsonEntry.name} inside archive, reading…`);
+    const text = await jsonEntry.async('string');
+    return JSON.parse(text);
+  } else {
+    log('Reading JSON file…');
+    const text = await file.text();
+    return JSON.parse(text);
+  }
+}
+
+goBtn.addEventListener('click', async () => {
+  if (!selectedFile) return;
+  goBtn.disabled = true;
+  goBtn.textContent = 'Working…';
+  logEl.innerHTML = '';
+  summaryCard.classList.remove('show');
+  setProgress(3);
+
+  try {
+    const data = await readJsonFromFile(selectedFile);
+    setProgress(15);
+    log('Parsed JSON successfully.', 'ok');
+
+    const outZip = new JSZip();
+    const stats = { categories: 0, categoryFiles: 0, individualChats: 0, groupChats: 0, totalMessages: 0 };
+
+    // ---------- Direct Messages: fully separate top-level folder ----------
+    const dmFolder = outZip.folder('Direct Messages');
+    const dmRoot = data['Direct Message'];
+
+    if (dmRoot){
+      // 1:1 chats
+      const chatHistory = dmRoot['Direct Messages'] && dmRoot['Direct Messages']['ChatHistory'];
+      if (chatHistory){
+        const individualFolder = dmFolder.folder('Individual Chats');
+        for (const [rawKey, messages] of Object.entries(chatHistory)){
+          if (!Array.isArray(messages) || messages.length === 0) continue;
+          const person = extractName(rawKey, 'Chat History');
+          const filename = sanitize(person) + '.txt';
+          individualFolder.file(filename, formatTranscript(messages, person));
+          stats.individualChats++;
+          stats.totalMessages += messages.length;
+          log(`Direct Messages/Individual Chats/${filename}  (${messages.length} messages)`);
+        }
+      }
+
+      // Group chats
+      const groupChat = dmRoot['Group Chat'] && dmRoot['Group Chat']['GroupChat'];
+      if (groupChat){
+        const groupFolder = dmFolder.folder('Group Chats');
+        for (const [rawKey, messages] of Object.entries(groupChat)){
+          if (!Array.isArray(messages) || messages.length === 0) continue;
+          const group = extractName(rawKey, 'Group Chat');
+          const filename = sanitize(group) + '.txt';
+          groupFolder.file(filename, formatTranscript(messages, group));
+          stats.groupChats++;
+          stats.totalMessages += messages.length;
+          log(`Direct Messages/Group Chats/${filename}  (${messages.length} messages)`);
+        }
+      }
+
+      // Tako (AI chat) history, if present and non-empty
+      const tako = dmRoot['Tako Chat History'] && dmRoot['Tako Chat History']['TakoChatHistoryList'];
+      if (Array.isArray(tako) && tako.length > 0){
+        dmFolder.file('Tako Chat History.json', JSON.stringify(tako, null, 2));
+        log('Direct Messages/Tako Chat History.json');
+      }
+    }
+
+    setProgress(45);
+
+    // ---------- Everything else: Categories/<Category>/<Section>.json ----------
+    const categoriesFolder = outZip.folder('Categories');
+    const entries = Object.entries(data).filter(([k]) => k !== 'Direct Message');
+    let done = 0;
+
+    for (const [categoryName, categoryValue] of entries){
+      if (categoryValue === null || categoryValue === undefined) continue;
+      const catFolderName = sanitize(categoryName);
+      const catFolder = categoriesFolder.folder(catFolderName);
+      let wroteAny = false;
+
+      if (typeof categoryValue === 'object' && !Array.isArray(categoryValue)){
+        for (const [sectionName, sectionValue] of Object.entries(categoryValue)){
+          const isEmpty =
+            sectionValue === null ||
+            sectionValue === undefined ||
+            (typeof sectionValue === 'object' && Object.keys(sectionValue).length === 0) ||
+            (Array.isArray(sectionValue) && sectionValue.length === 0);
+          if (isEmpty) continue;
+          const filename = sanitize(sectionName) + '.json';
+          catFolder.file(filename, JSON.stringify(sectionValue, null, 2));
+          stats.categoryFiles++;
+          wroteAny = true;
+        }
+      } else {
+        catFolder.file(catFolderName + '.json', JSON.stringify(categoryValue, null, 2));
+        stats.categoryFiles++;
+        wroteAny = true;
+      }
+
+      if (wroteAny){
+        stats.categories++;
+        log(`Categories/${catFolderName}/ ready`, 'ok');
+      }
+      done++;
+      setProgress(45 + (done / entries.length) * 35);
+    }
+
+    // README
+    const readme = `TikTok Data Export — Organized
+Generated: ${new Date().toISOString()}
+
+Direct Messages/
+  Individual Chats/   one .txt transcript per person, oldest to newest
+  Group Chats/        one .txt transcript per group chat
+  (kept fully separate from every other category, as requested)
+
+Categories/
+  One folder per top-level export category. Each section inside a
+  category becomes its own .json file, named after that section.
+  Empty or unused sections are skipped.
+
+Totals:
+  Individual chat threads: ${stats.individualChats}
+  Group chat threads:      ${stats.groupChats}
+  Total messages:          ${stats.totalMessages}
+  Category folders:        ${stats.categories}
+  Category files:          ${stats.categoryFiles}
+`;
+    outZip.file('README.txt', readme);
+
+    log('Compressing final package…');
+    setProgress(85);
+
+    const blob = await outZip.generateAsync(
+      { type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 4 } },
+      (meta) => setProgress(85 + meta.percent * 0.15)
+    );
+
+    setProgress(100);
+    log('Package ready.', 'ok');
+
+    const url = URL.createObjectURL(blob);
+    downloadLink.href = url;
+    downloadLink.download = 'tiktok_data_organized.zip';
+
+    statGrid.innerHTML = `
+      <div class="stat"><div class="n">${stats.individualChats}</div><div class="l">1:1 chat threads</div></div>
+      <div class="stat"><div class="n">${stats.groupChats}</div><div class="l">group chats</div></div>
+      <div class="stat"><div class="n">${stats.totalMessages.toLocaleString()}</div><div class="l">messages</div></div>
+      <div class="stat"><div class="n">${stats.categories}</div><div class="l">category folders</div></div>
+      <div class="stat"><div class="n">${(blob.size/1024/1024).toFixed(1)} MB</div><div class="l">zip size</div></div>
+    `;
+    summaryCard.classList.add('show');
+
+    goBtn.disabled = false;
+    goBtn.textContent = 'Organize my data';
+
+  } catch (err){
+    console.error(err);
+    log('Error: ' + err.message, 'warn');
+    goBtn.disabled = false;
+    goBtn.textContent = 'Try again';
+  }
+});
+</script>
+</body>
+</html>

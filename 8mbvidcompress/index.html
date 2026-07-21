@@ -282,12 +282,14 @@
                 // Execute standard highly compatible single-pass scaling operation setup
                 await ffmpeg.run(
                     '-i', inputName,
+                    '-threads', '2', // Ogranicza zużycie pamięci przeglądarki
                     '-b:v', `${videoBitrateK}k`,
                     '-c:v', 'libx264',
+                    '-preset', 'veryfast', // Przyspiesza kompresję w przeglądarce
                     '-profile:v', 'high',
                     '-level', '4.0',
                     '-pix_fmt', 'yuv420p',
-                    '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2', // <-- DODAJ TO
+                    '-vf', 'scale=1280:-2', // Skaluje do 720p (i automatycznie wyrównuje do parzystych pikseli)
                     '-b:a', `${audioBitrateK}k`,
                     '-c:a', 'aac',
                     '-movflags', '+faststart',

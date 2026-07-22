@@ -1,0 +1,823 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>video → gif · scope converter</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600&display=swap" rel="stylesheet">
+    <script src="coi-serviceworker.js"></script>
+    <style>
+        :root {
+            --bg: #0f0d0b;
+            --bg-alt: #17140f;
+            --panel: rgba(247, 240, 227, 0.035);
+            --line: rgba(247, 240, 227, 0.10);
+            --line-strong: rgba(247, 240, 227, 0.22);
+            --text: #f4efe6;
+            --text-dim: #9c948a;
+            --amber: #ffb454;
+            --amber-dim: rgba(255, 180, 84, 0.14);
+            --cyan: #6fe6d8;
+            --cyan-dim: rgba(111, 230, 216, 0.14);
+            --danger: #ff6b6b;
+            --font-display: 'Space Grotesk', sans-serif;
+            --font-mono: 'IBM Plex Mono', monospace;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            scrollbar-color: var(--line-strong) transparent;
+        }
+
+        body {
+            background: var(--bg);
+            font-family: var(--font-display);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            position: relative;
+            line-height: 1.5;
+        }
+
+        .scope-field {
+            position: fixed;
+            inset: 0;
+            z-index: -10;
+            pointer-events: none;
+            background-image:
+                repeating-linear-gradient(to bottom, rgba(247, 240, 227, 0.025) 0px, rgba(247, 240, 227, 0.025) 1px, transparent 1px, transparent 3px),
+                radial-gradient(circle at 20% 15%, var(--amber-dim), transparent 40%),
+                radial-gradient(circle at 82% 85%, var(--cyan-dim), transparent 42%);
+        }
+
+        .mono {
+            font-family: var(--font-mono);
+            letter-spacing: 0.01em;
+        }
+
+        .panel {
+            background: var(--panel);
+            border: 1px solid var(--line);
+            backdrop-filter: blur(10px);
+            border-radius: 12px;
+            padding: 1.5rem;
+        }
+
+        .status-badge {
+            font-family: var(--font-mono);
+            font-size: 0.7rem;
+            font-weight: 500;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            padding: 0.4rem 0.75rem;
+            border-radius: 3px;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            border: 1px solid var(--line);
+        }
+        .status-badge .dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 1px;
+            flex-shrink: 0;
+        }
+
+        .status-init {
+            color: var(--amber);
+            background: var(--amber-dim);
+            border-color: rgba(255, 180, 84, 0.3);
+        }
+        .status-init .dot {
+            background: var(--amber);
+            animation: blink 1.2s ease-in-out infinite;
+        }
+
+        .status-ready {
+            color: var(--cyan);
+            background: var(--cyan-dim);
+            border-color: rgba(111, 230, 216, 0.3);
+        }
+        .status-ready .dot {
+            background: var(--cyan);
+        }
+
+        .status-error {
+            color: var(--danger);
+            background: rgba(255, 107, 107, 0.1);
+            border-color: rgba(255, 107, 107, 0.3);
+        }
+        .status-error .dot {
+            background: var(--danger);
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.25; }
+        }
+
+        .drop-zone {
+            border: 2px dashed var(--line);
+            border-radius: 14px;
+            padding: 2.5rem 1.5rem;
+            text-align: center;
+            cursor: pointer;
+            transition: border-color 0.2s ease, background 0.2s ease;
+            position: relative;
+            background: rgba(247, 240, 227, 0.015);
+        }
+        .drop-zone:hover,
+        .drop-zone.drag-over {
+            border-color: var(--amber);
+            background: rgba(255, 180, 84, 0.04);
+        }
+        .drop-zone.has-file {
+            border-color: var(--cyan);
+            background: rgba(111, 230, 216, 0.04);
+        }
+
+        .frame-corner {
+            position: absolute;
+            width: 16px;
+            height: 16px;
+            border-color: var(--line-strong);
+            transition: border-color 0.2s ease;
+            pointer-events: none;
+        }
+        .frame-corner.tl { top: 10px; left: 10px; border-top: 2px solid; border-left: 2px solid; }
+        .frame-corner.tr { top: 10px; right: 10px; border-top: 2px solid; border-right: 2px solid; }
+        .frame-corner.bl { bottom: 10px; left: 10px; border-bottom: 2px solid; border-left: 2px solid; }
+        .frame-corner.br { bottom: 10px; right: 10px; border-bottom: 2px solid; border-right: 2px solid; }
+        .drop-zone:hover .frame-corner,
+        .drop-zone.drag-over .frame-corner {
+            border-color: var(--amber);
+        }
+        .drop-zone.has-file .frame-corner {
+            border-color: var(--cyan);
+        }
+
+        .upload-icon {
+            font-size: 2.4rem;
+            display: block;
+            margin-bottom: 0.8rem;
+            color: var(--text-dim);
+            transition: color 0.2s;
+        }
+        .drop-zone:hover .upload-icon {
+            color: var(--amber);
+        }
+
+        .file-badge {
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            color: var(--cyan);
+            background: var(--cyan-dim);
+            padding: 0.3rem 0.8rem;
+            border-radius: 50px;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            margin-top: 1rem;
+            border: 1px solid rgba(111, 230, 216, 0.3);
+        }
+
+        .toggle-switch {
+            position: relative;
+            width: 38px;
+            height: 22px;
+            border-radius: 999px;
+            background: var(--bg-alt);
+            border: 1px solid var(--line);
+            flex-shrink: 0;
+            cursor: pointer;
+            transition: background 0.15s ease, border-color 0.15s ease;
+        }
+        .toggle-switch .thumb {
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: var(--text-dim);
+            transition: transform 0.15s ease, background 0.15s ease;
+        }
+        .toggle-switch.is-on {
+            background: var(--amber-dim);
+            border-color: rgba(255, 180, 84, 0.4);
+        }
+        .toggle-switch.is-on .thumb {
+            transform: translateX(16px);
+            background: var(--amber);
+        }
+
+        .tick-track {
+            width: 100%;
+            height: 8px;
+            border-radius: 2px;
+            background:
+                repeating-linear-gradient(to right, var(--bg-alt) 0px, var(--bg-alt) 3px, transparent 3px, transparent 4px),
+                var(--bg-alt);
+            border: 1px solid var(--line);
+            overflow: hidden;
+            margin: 0.8rem 0;
+        }
+        .tick-fill {
+            height: 100%;
+            width: 0%;
+            background: repeating-linear-gradient(to right, var(--amber) 0px, var(--amber) 3px, rgba(0,0,0,0.25) 3px, rgba(0,0,0,0.25) 4px);
+            transition: width 0.2s ease;
+        }
+
+        .adv-toggle {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            width: 100%;
+            padding: 0.6rem 0.1rem;
+            background: transparent;
+            border: none;
+            color: var(--text-dim);
+            cursor: pointer;
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+        }
+        .adv-toggle:hover {
+            color: var(--text);
+        }
+        .adv-toggle svg {
+            width: 14px;
+            height: 14px;
+            transition: transform 0.15s ease;
+        }
+        .adv-toggle.is-open svg {
+            transform: rotate(180deg);
+        }
+
+        .adv-panel {
+            border-top: 1px solid var(--line);
+            padding-top: 0.9rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+        .adv-field label {
+            display: block;
+            font-family: var(--font-mono);
+            font-size: 0.68rem;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            color: var(--text-dim);
+            margin-bottom: 0.4rem;
+        }
+        .adv-field select,
+        .adv-field input {
+            width: 100%;
+            background: var(--bg-alt);
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            color: var(--text);
+            font-family: var(--font-mono);
+            font-size: 0.82rem;
+            padding: 0.5rem 0.5rem;
+            appearance: none;
+        }
+        .adv-field select {
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%239c948a' stroke-width='2'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 0.5rem center;
+            background-size: 14px;
+            padding-right: 1.75rem;
+        }
+        .adv-field select:focus,
+        .adv-field input:focus {
+            border-color: var(--amber);
+            outline: none;
+        }
+
+        input[type="range"] {
+            -webkit-appearance: none;
+            width: 100%;
+            height: 4px;
+            background: var(--line);
+            border-radius: 4px;
+            outline: none;
+            margin: 0.6rem 0;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 16px;
+            height: 16px;
+            background: var(--amber);
+            border-radius: 2px;
+            cursor: pointer;
+            border: 1px solid var(--bg);
+        }
+        input[type="range"]:focus::-webkit-slider-thumb {
+            box-shadow: 0 0 0 2px var(--amber-dim);
+        }
+
+        .btn-primary {
+            background: var(--amber);
+            color: #221a0f;
+            border: none;
+            padding: 0.9rem 1.8rem;
+            font-family: var(--font-display);
+            font-weight: 600;
+            font-size: 0.95rem;
+            letter-spacing: 0.03em;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background 0.15s;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            width: 100%;
+        }
+        .btn-primary:hover {
+            background: #ffc471;
+        }
+        .btn-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            background: var(--line);
+            color: var(--text-dim);
+        }
+
+        .btn-secondary {
+            background: var(--cyan);
+            color: #0d2320;
+            border: none;
+            padding: 0.8rem 1.6rem;
+            font-family: var(--font-display);
+            font-weight: 600;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background 0.15s;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            width: 100%;
+        }
+        .btn-secondary:hover {
+            background: #8aeee2;
+        }
+
+        button:focus-visible,
+        a:focus-visible,
+        input:focus-visible {
+            outline: 2px solid var(--cyan);
+            outline-offset: 2px;
+        }
+
+        .result-preview img {
+            max-width: 100%;
+            max-height: 340px;
+            border-radius: 8px;
+            border: 1px solid var(--line);
+            margin: 1rem 0;
+        }
+
+        .flex-row {
+            display: flex;
+            gap: 0.8rem;
+            align-items: center;
+        }
+        .flex-col {
+            display: flex;
+            flex-direction: column;
+            gap: 0.8rem;
+        }
+        .gap-sm { gap: 0.4rem; }
+        .mt-1 { margin-top: 0.5rem; }
+        .mt-2 { margin-top: 1rem; }
+        .mt-3 { margin-top: 1.5rem; }
+        .text-center { text-align: center; }
+        .hidden { display: none !important; }
+        .uppercase { text-transform: uppercase; letter-spacing: 0.06em; }
+
+        .status-line {
+            font-family: var(--font-mono);
+            font-size: 0.7rem;
+            color: var(--text-dim);
+            text-align: center;
+            margin-top: 0.25rem;
+        }
+
+        @media (max-width: 500px) {
+            .panel {
+                padding: 1rem;
+            }
+            .drop-zone {
+                padding: 1.8rem 1rem;
+            }
+            .upload-icon {
+                font-size: 2rem;
+            }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .status-init .dot {
+                animation: none;
+            }
+            * {
+                transition: none !important;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="scope-field"></div>
+
+    <div style="width: 100%; max-width: 620px; display: flex; flex-direction: column; gap: 1.2rem;">
+        <!-- Header -->
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+            <div>
+                <h1 style="font-weight: 600; font-size: 1.8rem; letter-spacing: -0.02em; margin-bottom: 0.1rem;">
+                    video <span style="color: var(--amber);">→</span> gif
+                </h1>
+                <p style="font-size: 0.8rem; color: var(--text-dim);">browser‑native ffmpeg conversion</p>
+            </div>
+            <div id="engineStatus" class="status-badge status-init">
+                <span class="dot"></span> ffmpeg idle
+            </div>
+        </div>
+
+        <!-- Upload -->
+        <div class="panel">
+            <div class="drop-zone" id="dropZone" tabindex="0">
+                <div class="frame-corner tl"></div>
+                <div class="frame-corner tr"></div>
+                <div class="frame-corner bl"></div>
+                <div class="frame-corner br"></div>
+                <span class="upload-icon">📼</span>
+                <p style="font-weight: 500;">drop video or <span style="color: var(--amber); text-decoration: underline;">browse</span></p>
+                <p style="font-size: 0.75rem; color: var(--text-dim); margin-top: 0.3rem;">mp4, mov, webm · max 200 MB</p>
+                <input type="file" id="fileInput" accept="video/*" hidden>
+                <div id="fileBadge" class="file-badge hidden"></div>
+            </div>
+        </div>
+
+        <!-- Settings -->
+        <div class="panel">
+            <div class="flex-col">
+                <div class="flex-row" style="justify-content: space-between;">
+                    <span class="mono uppercase" style="font-size: 0.7rem; color: var(--text-dim);">frame rate</span>
+                    <span id="fpsVal" class="mono" style="color: var(--amber);">12 fps</span>
+                </div>
+                <input type="range" id="fpsSlider" min="4" max="30" value="12" step="1">
+                <div class="flex-row" style="justify-content: space-between;">
+                    <span class="mono uppercase" style="font-size: 0.7rem; color: var(--text-dim);">width</span>
+                    <span id="widthVal" class="mono" style="color: var(--amber);">480 px</span>
+                </div>
+                <input type="range" id="widthSlider" min="120" max="800" value="480" step="10">
+                <div class="flex-row" style="justify-content: space-between;">
+                    <span class="mono uppercase" style="font-size: 0.7rem; color: var(--text-dim);">colors</span>
+                    <span id="colorsVal" class="mono" style="color: var(--amber);">128</span>
+                </div>
+                <input type="range" id="colorsSlider" min="16" max="256" value="128" step="8">
+            </div>
+            <div class="flex-row" style="justify-content: space-between; margin-top: 1rem;">
+                <span class="mono" style="font-size: 0.75rem;">dithering</span>
+                <div id="ditherToggle" class="toggle-switch is-on" tabindex="0" role="switch" aria-checked="true">
+                    <span class="thumb"></span>
+                </div>
+            </div>
+            <button id="advToggleBtn" class="adv-toggle">
+                advanced trim
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M6 9l6 6 6-6"/>
+                </svg>
+            </button>
+            <div id="advPanel" class="adv-panel hidden">
+                <div class="adv-field">
+                    <label>start (sec)</label>
+                    <input type="number" id="trimStart" value="0" min="0" step="0.1" placeholder="0">
+                </div>
+                <div class="adv-field">
+                    <label>duration (sec)</label>
+                    <input type="number" id="trimDuration" value="5" min="0.5" max="120" step="0.5" placeholder="5">
+                </div>
+            </div>
+        </div>
+
+        <!-- Convert button + progress -->
+        <button id="convertBtn" class="btn-primary" disabled>
+            ⚡ convert to gif
+        </button>
+
+        <div id="progressSection" class="panel hidden">
+            <div class="tick-track">
+                <div id="progressFill" class="tick-fill" style="width: 0%;"></div>
+            </div>
+            <div id="progressLabel" class="status-line">initializing…</div>
+        </div>
+
+        <!-- Result -->
+        <div id="resultSection" class="panel hidden text-center">
+            <div class="result-preview">
+                <img id="resultGif" src="" alt="GIF preview">
+            </div>
+            <div id="resultStats" class="mono" style="font-size: 0.75rem; color: var(--text-dim);"></div>
+            <div class="flex-col mt-2">
+                <button id="downloadBtn" class="btn-secondary">💾 download gif</button>
+                <button id="newConvertBtn" style="background: transparent; border: 1px solid var(--line); color: var(--text); padding: 0.7rem; border-radius: 8px; cursor: pointer;">
+                    🔄 convert another
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast container -->
+    <div id="toastContainer" style="position: fixed; top: 20px; right: 20px; z-index: 999; display: flex; flex-direction: column; gap: 0.5rem;"></div>
+
+    <script src="ffmpeg.min.js"></script>
+    <script>
+        (function() {
+            // ─── DOM references ───────────────────────────
+            const dropZone = document.getElementById('dropZone');
+            const fileInput = document.getElementById('fileInput');
+            const fileBadge = document.getElementById('fileBadge');
+            const convertBtn = document.getElementById('convertBtn');
+            const progressSection = document.getElementById('progressSection');
+            const progressFill = document.getElementById('progressFill');
+            const progressLabel = document.getElementById('progressLabel');
+            const resultSection = document.getElementById('resultSection');
+            const resultGif = document.getElementById('resultGif');
+            const resultStats = document.getElementById('resultStats');
+            const downloadBtn = document.getElementById('downloadBtn');
+            const newConvertBtn = document.getElementById('newConvertBtn');
+            const engineStatus = document.getElementById('engineStatus');
+            const toastContainer = document.getElementById('toastContainer');
+            const advToggleBtn = document.getElementById('advToggleBtn');
+            const advPanel = document.getElementById('advPanel');
+            const ditherToggle = document.getElementById('ditherToggle');
+            const fpsSlider = document.getElementById('fpsSlider');
+            const widthSlider = document.getElementById('widthSlider');
+            const colorsSlider = document.getElementById('colorsSlider');
+            const fpsVal = document.getElementById('fpsVal');
+            const widthVal = document.getElementById('widthVal');
+            const colorsVal = document.getElementById('colorsVal');
+            const trimStart = document.getElementById('trimStart');
+            const trimDuration = document.getElementById('trimDuration');
+
+            let selectedFile = null;
+            let outputBlobUrl = null;
+            let ffmpegInstance = null;
+            let isConverting = false;
+
+            // ─── Toast ────────────────────────────────────
+            function showToast(message, type = 'info') {
+                const toast = document.createElement('div');
+                toast.className = 'status-badge';
+                if (type === 'error') toast.classList.add('status-error');
+                else if (type === 'success') toast.classList.add('status-ready');
+                else toast.classList.add('status-init');
+                toast.innerHTML = `<span class="dot"></span> ${message}`;
+                toastContainer.appendChild(toast);
+                setTimeout(() => toast.remove(), 4000);
+            }
+
+            // ─── Status badge update ──────────────────────
+            function setEngineStatus(status) {
+                engineStatus.className = 'status-badge';
+                if (status === 'loading') {
+                    engineStatus.classList.add('status-init');
+                    engineStatus.innerHTML = '<span class="dot"></span> loading ffmpeg';
+                } else if (status === 'ready') {
+                    engineStatus.classList.add('status-ready');
+                    engineStatus.innerHTML = '<span class="dot"></span> ffmpeg ready';
+                } else if (status === 'error') {
+                    engineStatus.classList.add('status-error');
+                    engineStatus.innerHTML = '<span class="dot"></span> ffmpeg error';
+                } else {
+                    engineStatus.classList.add('status-init');
+                    engineStatus.innerHTML = '<span class="dot"></span> ffmpeg idle';
+                }
+            }
+
+            // ─── Toggle switches ──────────────────────────
+            function setupToggle(element, onChange) {
+                let on = element.classList.contains('is-on');
+                element.addEventListener('click', () => {
+                    on = !on;
+                    element.classList.toggle('is-on', on);
+                    element.setAttribute('aria-checked', on);
+                    if (onChange) onChange(on);
+                });
+            }
+            setupToggle(ditherToggle);
+            let trimEnabled = false;
+            setupToggle({
+                classList: { contains: () => trimEnabled },
+                addEventListener: (_, fn) => advToggleBtn.addEventListener('click', () => {
+                    trimEnabled = !trimEnabled;
+                    advPanel.classList.toggle('hidden', !trimEnabled);
+                    advToggleBtn.classList.toggle('is-open', trimEnabled);
+                    fn(trimEnabled);
+                })
+            }); // simplified; we'll just handle directly
+
+            advToggleBtn.addEventListener('click', () => {
+                trimEnabled = !trimEnabled;
+                advPanel.classList.toggle('hidden', !trimEnabled);
+                advToggleBtn.classList.toggle('is-open', trimEnabled);
+            });
+
+            // ─── Slider labels ────────────────────────────
+            function updateLabels() {
+                fpsVal.textContent = fpsSlider.value + ' fps';
+                widthVal.textContent = widthSlider.value + ' px';
+                colorsVal.textContent = colorsSlider.value;
+            }
+            fpsSlider.addEventListener('input', updateLabels);
+            widthSlider.addEventListener('input', updateLabels);
+            colorsSlider.addEventListener('input', updateLabels);
+            updateLabels();
+
+            // ─── File handling ────────────────────────────
+            dropZone.addEventListener('click', (e) => {
+                if (e.target !== fileInput) fileInput.click();
+            });
+            dropZone.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault();
+                    fileInput.click(); }
+            });
+            fileInput.addEventListener('change', () => {
+                if (fileInput.files.length) handleFile(fileInput.files[0]);
+            });
+
+            dropZone.addEventListener('dragover', e => { e.preventDefault();
+                dropZone.classList.add('drag-over'); });
+            dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+            dropZone.addEventListener('drop', e => {
+                e.preventDefault();
+                dropZone.classList.remove('drag-over');
+                if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+            });
+
+            function handleFile(file) {
+                if (!file.type.startsWith('video/') && !/\.(mp4|webm|mov|avi|mkv|ogg)$/i.test(file.name)) {
+                    showToast('invalid video file', 'error');
+                    return;
+                }
+                if (file.size > 200 * 1024 * 1024) {
+                    showToast('file too large (max 200 MB)', 'error');
+                    return;
+                }
+                selectedFile = file;
+                dropZone.classList.add('has-file');
+                fileBadge.classList.remove('hidden');
+                fileBadge.innerHTML = `📹 ${file.name} <span style="opacity:0.7;">(${(file.size/1024/1024).toFixed(1)} MB)</span>`;
+                convertBtn.disabled = false;
+                resultSection.classList.add('hidden');
+                progressSection.classList.add('hidden');
+                if (outputBlobUrl) { URL.revokeObjectURL(outputBlobUrl);
+                    outputBlobUrl = null; }
+                showToast('video loaded', 'success');
+            }
+
+            // ─── FFmpeg init ──────────────────────────────
+            async function loadFFmpeg() {
+                if (ffmpegInstance?.isLoaded) return ffmpegInstance;
+                setEngineStatus('loading');
+                if (!window.FFmpegWASM) throw new Error('FFmpegWASM not loaded. Check ffmpeg.min.js');
+                const { createFFmpeg } = window.FFmpegWASM;
+                ffmpegInstance = createFFmpeg({
+                    corePath: './ffmpeg-core.js',
+                    log: false,
+                    logger: () => {},
+                    progress: ({ ratio }) => {
+                        if (isConverting && ratio >= 0 && ratio <= 1) {
+                            progressFill.style.width = Math.round(ratio * 100) + '%';
+                            progressLabel.textContent = `processing… ${Math.round(ratio * 100)}%`;
+                        }
+                    }
+                });
+                await ffmpegInstance.load();
+                ffmpegInstance.isLoaded = true;
+                setEngineStatus('ready');
+                return ffmpegInstance;
+            }
+
+            // ─── Conversion ───────────────────────────────
+            convertBtn.addEventListener('click', async () => {
+                if (!selectedFile || isConverting) return;
+                isConverting = true;
+                convertBtn.disabled = true;
+                convertBtn.innerHTML = '<span class="dot" style="display:inline-block; width:8px; height:8px; background:var(--bg); border-radius:1px;"></span> converting…';
+                progressSection.classList.remove('hidden');
+                resultSection.classList.add('hidden');
+                progressFill.style.width = '0%';
+                progressLabel.textContent = 'loading ffmpeg…';
+                if (outputBlobUrl) { URL.revokeObjectURL(outputBlobUrl);
+                    outputBlobUrl = null; }
+
+                const inputName = 'input.' + (selectedFile.name.split('.').pop() || 'mp4');
+                const outputName = 'output.gif';
+                let ffmpeg;
+                try {
+                    ffmpeg = await loadFFmpeg();
+                } catch (err) {
+                    showToast('ffmpeg load failed: ' + err.message, 'error');
+                    resetUI();
+                    return;
+                }
+
+                try {
+                    const fileData = new Uint8Array(await selectedFile.arrayBuffer());
+                    ffmpeg.FS('writeFile', inputName, fileData);
+                    progressLabel.textContent = 'converting…';
+                    progressFill.style.width = '5%';
+
+                    const fps = fpsSlider.value;
+                    const width = widthSlider.value;
+                    const colors = colorsSlider.value;
+                    const dither = ditherToggle.classList.contains('is-on');
+                    const trimActive = trimEnabled;
+                    const args = [];
+                    if (trimActive) {
+                        const start = trimStart.value || 0;
+                        const dur = trimDuration.value || 5;
+                        if (start > 0) args.push('-ss', start.toString());
+                        if (dur > 0) args.push('-t', dur.toString());
+                    }
+                    args.push('-i', inputName);
+                    const ditherMethod = dither ? 'bayer:bayer_scale=5' : 'none';
+                    const filter = `fps=${fps},scale=${width}:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=${colors}:stats_mode=diff[p];[s1][p]paletteuse=dither=${ditherMethod}`;
+                    args.push('-vf', filter, '-loop', '0', '-f', 'gif', '-y', outputName);
+                    const startTime = performance.now();
+                    await ffmpeg.run(...args);
+                    const elapsed = ((performance.now() - startTime) / 1000).toFixed(1);
+
+                    const outputData = ffmpeg.FS('readFile', outputName);
+                    const blob = new Blob([outputData], { type: 'image/gif' });
+                    outputBlobUrl = URL.createObjectURL(blob);
+                    resultGif.src = outputBlobUrl;
+                    resultGif.onload = () => {
+                        const inSize = selectedFile.size;
+                        const outSize = blob.size;
+                        resultStats.innerHTML = `
+                            input ${(inSize/1024/1024).toFixed(1)} MB → output ${(outSize/1024/1024).toFixed(2)} MB · ${elapsed}s
+                            ${inSize>0 ? '· ' + ((1-outSize/inSize)*100).toFixed(0)+'% smaller' : ''}
+                        `;
+                    };
+                    resultSection.classList.remove('hidden');
+                    progressSection.classList.add('hidden');
+                    showToast('gif ready', 'success');
+                    ffmpeg.FS('unlink', inputName);
+                    ffmpeg.FS('unlink', outputName);
+                } catch (err) {
+                    showToast('conversion error: ' + err.message, 'error');
+                    progressSection.classList.add('hidden');
+                    try { ffmpeg.FS('unlink', inputName);
+                        ffmpeg.FS('unlink', outputName); } catch (e) {}
+                } finally {
+                    resetUI();
+                }
+            });
+
+            function resetUI() {
+                isConverting = false;
+                convertBtn.disabled = !selectedFile;
+                convertBtn.innerHTML = '⚡ convert to gif';
+            }
+
+            downloadBtn.addEventListener('click', () => {
+                if (!outputBlobUrl) return;
+                const a = document.createElement('a');
+                a.href = outputBlobUrl;
+                a.download = (selectedFile?.name.replace(/\.[^.]+$/, '') || 'video') + '_converted.gif';
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+            });
+
+            newConvertBtn.addEventListener('click', () => {
+                resultSection.classList.add('hidden');
+                progressSection.classList.add('hidden');
+                if (outputBlobUrl) { URL.revokeObjectURL(outputBlobUrl);
+                    outputBlobUrl = null; }
+                resultGif.src = '';
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            });
+
+            // Check SharedArrayBuffer
+            if (typeof SharedArrayBuffer === 'undefined') {
+                showToast('⚠️ SharedArrayBuffer missing – serve via HTTPS/localhost', 'error');
+            }
+        })();
+    </script>
+</body>
+</html>

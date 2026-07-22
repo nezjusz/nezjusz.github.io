@@ -373,72 +373,76 @@
         }
 
         async function loadFFmpeg() {
-            if(ffmpegInstance?.isLoaded) return ffmpegInstance;
+            if (ffmpegInstance?.isLoaded) return ffmpegInstance;
             setEngineStatus('loading');
             logDebug('Starting FFmpeg load...');
-            if(typeof SharedArrayBuffer==='undefined') throw new Error('SharedArrayBuffer not available.');
+            if (typeof SharedArrayBuffer === 'undefined') throw new Error('SharedArrayBuffer not available.');
 
             const factory = detectFactory();
-            if(!factory) throw new Error('ffmpeg-wasm API not detected.');
+            if (!factory) throw new Error('ffmpeg-wasm API not detected.');
 
             const base = './';
-            const coreJsPath = base+'ffmpeg-core.js';
-            const wasmPath = base+'ffmpeg-core.wasm';
-            const workerPath = base+'ffmpeg-core.worker.js';
+            // Use the original core JS path – do NOT create a blob URL for it!
+            const coreJsPath = base + 'ffmpeg-core.js';
+            const wasmPath = base + 'ffmpeg-core.wasm';
+            const workerPath = base + 'ffmpeg-core.worker.js';
 
-            let coreJsBlobUrl, wasmBlobUrl, workerBlobUrl;
+            let wasmBlobUrl, workerBlobUrl;
+
             try {
-                // Fetch core JS
-                const jsResp = await fetch(coreJsPath);
-                if(!jsResp.ok) throw new Error(`Failed to fetch core JS: ${jsResp.status}`);
-                const jsBlob = await jsResp.blob();
-                coreJsBlobUrl = URL.createObjectURL(jsBlob);
-                logDebug(`Core JS blob: ${coreJsBlobUrl}`);
-
-                // Fetch WASM and validate magic bytes
+                // 1. Fetch WASM binary, validate, create blob URL
                 const wasmResp = await fetch(wasmPath);
-                if(!wasmResp.ok) throw new Error(`Failed to fetch WASM: ${wasmResp.status}`);
+                if (!wasmResp.ok) throw new Error(`Failed to fetch WASM: ${wasmResp.status}`);
                 const wasmBlob = await wasmResp.blob();
-                // Check magic number (first 4 bytes of .wasm are 0x00 0x61 0x73 0x6d)
-                const headerBytes = new Uint8Array(await wasmBlob.slice(0,4).arrayBuffer());
-                const magic = Array.from(headerBytes).map(b=>b.toString(16).padStart(2,'0')).join(' ');
+                const headerBytes = new Uint8Array(await wasmBlob.slice(0, 4).arrayBuffer());
+                const magic = Array.from(headerBytes).map(b => b.toString(16).padStart(2, '0')).join(' ');
                 logDebug(`WASM header bytes: ${magic}`);
-                if(magic !== '00 61 73 6d') {
-                    throw new Error(`Invalid WASM file! First bytes are "${magic}" (expected "00 61 73 6d"). The server returned a wrong file (maybe a JavaScript error page).`);
+                if (magic !== '00 61 73 6d') {
+                    throw new Error(`Invalid WASM file! First bytes: "${magic}"`);
                 }
                 wasmBlobUrl = URL.createObjectURL(wasmBlob);
-                logDebug(`WASM blob: ${wasmBlobUrl}`);
+                logDebug(`WASM blob URL ready: ${wasmBlobUrl}`);
 
-                // Optional worker
+                // 2. Optional worker
                 try {
                     const wResp = await fetch(workerPath);
-                    if(wResp.ok) { const wBlob = await wResp.blob(); workerBlobUrl = URL.createObjectURL(wBlob); logDebug(`Worker blob: ${workerBlobUrl}`); }
-                    else logDebug('Worker not found, skipping.');
-                } catch(e) { logDebug('Worker fetch failed (non-critical): '+e.message); }
+                    if (wResp.ok) {
+                        const wBlob = await wResp.blob();
+                        workerBlobUrl = URL.createObjectURL(wBlob);
+                        logDebug(`Worker blob URL ready: ${workerBlobUrl}`);
+                    } else {
+                        logDebug('Worker not found, skipping.');
+                    }
+                } catch (e) {
+                    logDebug('Worker fetch failed (non-critical): ' + e.message);
+                }
 
-                // Create FFmpeg with explicit blob URLs
+                // 3. Create FFmpeg with original corePath + explicit wasmPath
                 ffmpegInstance = factory({
-                    corePath: coreJsBlobUrl,
-                    wasmPath: wasmBlobUrl,
+                    corePath: coreJsPath,          // ← original file, not a blob
+                    wasmPath: wasmBlobUrl,        // ← our verified blob
                     ...(workerBlobUrl && { workerPath: workerBlobUrl }),
                     log: false,
-                    logger: ()=>{},
-                    progress: ({ratio}) => {
-                        if(isConverting && ratio>=0 && ratio<=1) {
-                            progressFill.style.width = Math.round(ratio*100)+'%';
-                            progressLabel.textContent = `processing… ${Math.round(ratio*100)}%`;
+                    logger: () => {},
+                    progress: ({ ratio }) => {
+                        if (isConverting && ratio >= 0 && ratio <= 1) {
+                            progressFill.style.width = Math.round(ratio * 100) + '%';
+                            progressLabel.textContent = `processing… ${Math.round(ratio * 100)}%`;
                         }
                     }
                 });
+
                 logDebug('Calling ffmpeg.load()...');
                 await ffmpegInstance.load();
                 ffmpegInstance.isLoaded = true;
-                logDebug('✅ FFmpeg loaded.');
+                logDebug('✅ FFmpeg loaded successfully.');
                 setEngineStatus('ready');
                 return ffmpegInstance;
-            } catch(err) {
-                logDebug('❌ FFmpeg load error: '+err.message);
-                [coreJsBlobUrl, wasmBlobUrl, workerBlobUrl].forEach(u=>{ if(u) URL.revokeObjectURL(u); });
+
+            } catch (err) {
+                logDebug('❌ FFmpeg load error: ' + err.message);
+                // Clean up blob URLs on failure
+                [wasmBlobUrl, workerBlobUrl].forEach(u => { if (u) URL.revokeObjectURL(u); });
                 setEngineStatus('error');
                 throw err;
             }

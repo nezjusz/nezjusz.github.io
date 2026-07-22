@@ -113,6 +113,7 @@
         }
         .size-opt:hover { border-color: var(--line-strong); }
         .size-opt .meter-track { height: 32px; width: 6px; display: flex; align-items: flex-end; }
+        .size-opt .meter-track.icon-track { width: 24px; }
         .size-opt .meter-fill { width: 100%; border-radius: 1px; background: var(--text-dim); transition: background 0.15s ease; }
         .size-opt .meter-label { font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-dim); transition: color 0.15s ease; }
 
@@ -288,9 +289,9 @@
                             <span class="meter-label">50 MB</span>
                         </button>
                         <button data-size="custom" id="customSizeBtn" class="size-opt">
-                            <span class="meter-track items-center justify-center">
-                                <svg class="meter-icon w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.75" stroke="currentColor">
-                                    <path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L6.832 19.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.863 4.487Z" />
+                            <span class="meter-track icon-track items-center justify-center">
+                                <svg class="meter-icon w-6 h-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.75" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 13.5V3.75m0 9.75a1.5 1.5 0 0 1 0 3m0-3a1.5 1.5 0 0 0 0 3m0 3.75V16.5m12-3V3.75m0 9.75a1.5 1.5 0 0 1 0 3m0-3a1.5 1.5 0 0 0 0 3m0 3.75V16.5m-6-9V3.75m0 3.75a1.5 1.5 0 0 1 0 3m0-3a1.5 1.5 0 0 0 0 3m0 9.75V10.5" />
                                 </svg>
                             </span>
                             <span class="meter-label">Custom</span>

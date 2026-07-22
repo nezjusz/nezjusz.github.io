@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600&display=swap" rel="stylesheet">
-    <!-- COI Service Worker must be registered first for SharedArrayBuffer -->
+    <!-- COI Service Worker – must be loaded first for SharedArrayBuffer -->
     <script src="coi-serviceworker.js"></script>
     <style>
         :root {
@@ -53,7 +53,7 @@
             z-index: -10;
             pointer-events: none;
             background-image:
-                repeating-linear-gradient(to bottom, rgba(247, 240, 227, 0.025) 0px, rgba(247, 240, 227, 0.025) 1px, transparent 1px, transparent 3px),
+                repeating-linear-gradient(to bottom, rgba(247,240,227,0.025) 0px, rgba(247,240,227,0.025) 1px, transparent 1px, transparent 3px),
                 radial-gradient(circle at 20% 15%, var(--amber-dim), transparent 40%),
                 radial-gradient(circle at 82% 85%, var(--cyan-dim), transparent 42%);
         }
@@ -91,33 +91,12 @@
             flex-shrink: 0;
         }
 
-        .status-init {
-            color: var(--amber);
-            background: var(--amber-dim);
-            border-color: rgba(255, 180, 84, 0.3);
-        }
-        .status-init .dot {
-            background: var(--amber);
-            animation: blink 1.2s ease-in-out infinite;
-        }
-
-        .status-ready {
-            color: var(--cyan);
-            background: var(--cyan-dim);
-            border-color: rgba(111, 230, 216, 0.3);
-        }
-        .status-ready .dot {
-            background: var(--cyan);
-        }
-
-        .status-error {
-            color: var(--danger);
-            background: rgba(255, 107, 107, 0.1);
-            border-color: rgba(255, 107, 107, 0.3);
-        }
-        .status-error .dot {
-            background: var(--danger);
-        }
+        .status-init { color: var(--amber); background: var(--amber-dim); border-color: rgba(255,180,84,0.3); }
+        .status-init .dot { background: var(--amber); animation: blink 1.2s ease-in-out infinite; }
+        .status-ready { color: var(--cyan); background: var(--cyan-dim); border-color: rgba(111,230,216,0.3); }
+        .status-ready .dot { background: var(--cyan); }
+        .status-error { color: var(--danger); background: rgba(255,107,107,0.1); border-color: rgba(255,107,107,0.3); }
+        .status-error .dot { background: var(--danger); }
 
         @keyframes blink {
             0%, 100% { opacity: 1; }
@@ -132,16 +111,15 @@
             cursor: pointer;
             transition: border-color 0.2s ease, background 0.2s ease;
             position: relative;
-            background: rgba(247, 240, 227, 0.015);
+            background: rgba(247,240,227,0.015);
         }
-        .drop-zone:hover,
-        .drop-zone.drag-over {
+        .drop-zone:hover, .drop-zone.drag-over {
             border-color: var(--amber);
-            background: rgba(255, 180, 84, 0.04);
+            background: rgba(255,180,84,0.04);
         }
         .drop-zone.has-file {
             border-color: var(--cyan);
-            background: rgba(111, 230, 216, 0.04);
+            background: rgba(111,230,216,0.04);
         }
 
         .frame-corner {
@@ -156,13 +134,8 @@
         .frame-corner.tr { top: 10px; right: 10px; border-top: 2px solid; border-right: 2px solid; }
         .frame-corner.bl { bottom: 10px; left: 10px; border-bottom: 2px solid; border-left: 2px solid; }
         .frame-corner.br { bottom: 10px; right: 10px; border-bottom: 2px solid; border-right: 2px solid; }
-        .drop-zone:hover .frame-corner,
-        .drop-zone.drag-over .frame-corner {
-            border-color: var(--amber);
-        }
-        .drop-zone.has-file .frame-corner {
-            border-color: var(--cyan);
-        }
+        .drop-zone:hover .frame-corner, .drop-zone.drag-over .frame-corner { border-color: var(--amber); }
+        .drop-zone.has-file .frame-corner { border-color: var(--cyan); }
 
         .upload-icon {
             font-size: 2.4rem;
@@ -171,9 +144,7 @@
             color: var(--text-dim);
             transition: color 0.2s;
         }
-        .drop-zone:hover .upload-icon {
-            color: var(--amber);
-        }
+        .drop-zone:hover .upload-icon { color: var(--amber); }
 
         .file-badge {
             font-family: var(--font-mono);
@@ -186,7 +157,7 @@
             align-items: center;
             gap: 0.4rem;
             margin-top: 1rem;
-            border: 1px solid rgba(111, 230, 216, 0.3);
+            border: 1px solid rgba(111,230,216,0.3);
         }
 
         .toggle-switch {
@@ -210,14 +181,8 @@
             background: var(--text-dim);
             transition: transform 0.15s ease, background 0.15s ease;
         }
-        .toggle-switch.is-on {
-            background: var(--amber-dim);
-            border-color: rgba(255, 180, 84, 0.4);
-        }
-        .toggle-switch.is-on .thumb {
-            transform: translateX(16px);
-            background: var(--amber);
-        }
+        .toggle-switch.is-on { background: var(--amber-dim); border-color: rgba(255,180,84,0.4); }
+        .toggle-switch.is-on .thumb { transform: translateX(16px); background: var(--amber); }
 
         .tick-track {
             width: 100%;
@@ -252,17 +217,9 @@
             letter-spacing: 0.06em;
             text-transform: uppercase;
         }
-        .adv-toggle:hover {
-            color: var(--text);
-        }
-        .adv-toggle svg {
-            width: 14px;
-            height: 14px;
-            transition: transform 0.15s ease;
-        }
-        .adv-toggle.is-open svg {
-            transform: rotate(180deg);
-        }
+        .adv-toggle:hover { color: var(--text); }
+        .adv-toggle svg { width: 14px; height: 14px; transition: transform 0.15s ease; }
+        .adv-toggle.is-open svg { transform: rotate(180deg); }
 
         .adv-panel {
             border-top: 1px solid var(--line);
@@ -280,8 +237,7 @@
             color: var(--text-dim);
             margin-bottom: 0.4rem;
         }
-        .adv-field select,
-        .adv-field input {
+        .adv-field select, .adv-field input {
             width: 100%;
             background: var(--bg-alt);
             border: 1px solid var(--line);
@@ -299,11 +255,7 @@
             background-size: 14px;
             padding-right: 1.75rem;
         }
-        .adv-field select:focus,
-        .adv-field input:focus {
-            border-color: var(--amber);
-            outline: none;
-        }
+        .adv-field select:focus, .adv-field input:focus { border-color: var(--amber); outline: none; }
 
         input[type="range"] {
             -webkit-appearance: none;
@@ -323,9 +275,7 @@
             cursor: pointer;
             border: 1px solid var(--bg);
         }
-        input[type="range"]:focus::-webkit-slider-thumb {
-            box-shadow: 0 0 0 2px var(--amber-dim);
-        }
+        input[type="range"]:focus::-webkit-slider-thumb { box-shadow: 0 0 0 2px var(--amber-dim); }
 
         .btn-primary {
             background: var(--amber);
@@ -345,15 +295,8 @@
             gap: 0.5rem;
             width: 100%;
         }
-        .btn-primary:hover {
-            background: #ffc471;
-        }
-        .btn-primary:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-            background: var(--line);
-            color: var(--text-dim);
-        }
+        .btn-primary:hover { background: #ffc471; }
+        .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; background: var(--line); color: var(--text-dim); }
 
         .btn-secondary {
             background: var(--cyan);
@@ -371,13 +314,9 @@
             gap: 0.5rem;
             width: 100%;
         }
-        .btn-secondary:hover {
-            background: #8aeee2;
-        }
+        .btn-secondary:hover { background: #8aeee2; }
 
-        button:focus-visible,
-        a:focus-visible,
-        input:focus-visible {
+        button:focus-visible, a:focus-visible, input:focus-visible {
             outline: 2px solid var(--cyan);
             outline-offset: 2px;
         }
@@ -390,16 +329,8 @@
             margin: 1rem 0;
         }
 
-        .flex-row {
-            display: flex;
-            gap: 0.8rem;
-            align-items: center;
-        }
-        .flex-col {
-            display: flex;
-            flex-direction: column;
-            gap: 0.8rem;
-        }
+        .flex-row { display: flex; gap: 0.8rem; align-items: center; }
+        .flex-col { display: flex; flex-direction: column; gap: 0.8rem; }
         .gap-sm { gap: 0.4rem; }
         .mt-1 { margin-top: 0.5rem; }
         .mt-2 { margin-top: 1rem; }
@@ -416,7 +347,6 @@
             margin-top: 0.25rem;
         }
 
-        /* Debug info banner */
         .debug-info {
             background: var(--bg-alt);
             border: 1px solid var(--line);
@@ -427,27 +357,19 @@
             color: var(--text-dim);
             white-space: pre-wrap;
             word-break: break-all;
+            max-height: 180px;
+            overflow-y: auto;
         }
 
         @media (max-width: 500px) {
-            .panel {
-                padding: 1rem;
-            }
-            .drop-zone {
-                padding: 1.8rem 1rem;
-            }
-            .upload-icon {
-                font-size: 2rem;
-            }
+            .panel { padding: 1rem; }
+            .drop-zone { padding: 1.8rem 1rem; }
+            .upload-icon { font-size: 2rem; }
         }
 
         @media (prefers-reduced-motion: reduce) {
-            .status-init .dot {
-                animation: none;
-            }
-            * {
-                transition: none !important;
-            }
+            .status-init .dot { animation: none; }
+            * { transition: none !important; }
         }
     </style>
 </head>
@@ -468,7 +390,7 @@
             </div>
         </div>
 
-        <!-- Debug info (hidden by default, shown if errors occur) -->
+        <!-- Debug info -->
         <div id="debugPanel" class="debug-info hidden"></div>
 
         <!-- Upload -->
@@ -559,27 +481,23 @@
     <!-- Toast container -->
     <div id="toastContainer" style="position: fixed; top: 20px; right: 20px; z-index: 999; display: flex; flex-direction: column; gap: 0.5rem;"></div>
 
-    <!-- Load ffmpeg.wasm (must be loaded before our script) -->
+    <!-- ffmpeg.min.js must be loaded first -->
     <script src="ffmpeg.min.js"></script>
     <script>
         (function() {
             // ─── Debug & diagnostics ──────────────────────
             const debugPanel = document.getElementById('debugPanel');
-
             function logDebug(msg) {
                 console.log('[ffmpeg-gif]', msg);
                 debugPanel.classList.remove('hidden');
                 debugPanel.textContent += msg + '\n';
+                debugPanel.scrollTop = debugPanel.scrollHeight;
             }
-
-            // Check environment on startup
             logDebug('Environment check:');
-            logDebug('  SharedArrayBuffer: ' + (typeof SharedArrayBuffer !== 'undefined' ? '✅ available' :
-                '❌ missing (required!)'));
+            logDebug('  SharedArrayBuffer: ' + (typeof SharedArrayBuffer !== 'undefined' ? '✅ available' : '❌ missing'));
             logDebug('  window.FFmpeg: ' + (typeof window.FFmpeg !== 'undefined' ? '✅ found' : '❌ not found'));
             logDebug('  window.FFmpegWASM: ' + (typeof window.FFmpegWASM !== 'undefined' ? '✅ found' : '❌ not found'));
-            logDebug('  window.createFFmpeg: ' + (typeof window.createFFmpeg !== 'undefined' ? '✅ found' :
-                '❌ not found'));
+            logDebug('  window.createFFmpeg: ' + (typeof window.createFFmpeg !== 'undefined' ? '✅ found' : '❌ not found'));
 
             // ─── DOM references ───────────────────────────
             const dropZone = document.getElementById('dropZone');
@@ -625,7 +543,7 @@
                 setTimeout(() => toast.remove(), 4000);
             }
 
-            // ─── Status badge update ──────────────────────
+            // ─── Status badge ─────────────────────────────
             function setEngineStatus(status) {
                 engineStatus.className = 'status-badge';
                 if (status === 'loading') {
@@ -644,16 +562,10 @@
             }
 
             // ─── Toggle switches ──────────────────────────
-            function setupToggle(element, onChange) {
-                let on = element.classList.contains('is-on');
-                element.addEventListener('click', () => {
-                    on = !on;
-                    element.classList.toggle('is-on', on);
-                    element.setAttribute('aria-checked', on);
-                    if (onChange) onChange(on);
-                });
-            }
-            setupToggle(ditherToggle);
+            ditherToggle.addEventListener('click', () => {
+                ditherToggle.classList.toggle('is-on');
+                ditherToggle.setAttribute('aria-checked', ditherToggle.classList.contains('is-on'));
+            });
 
             let trimEnabled = false;
             advToggleBtn.addEventListener('click', () => {
@@ -674,19 +586,10 @@
             updateLabels();
 
             // ─── File handling ────────────────────────────
-            dropZone.addEventListener('click', (e) => {
-                if (e.target !== fileInput) fileInput.click();
-            });
-            dropZone.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault();
-                    fileInput.click(); }
-            });
-            fileInput.addEventListener('change', () => {
-                if (fileInput.files.length) handleFile(fileInput.files[0]);
-            });
-
-            dropZone.addEventListener('dragover', e => { e.preventDefault();
-                dropZone.classList.add('drag-over'); });
+            dropZone.addEventListener('click', (e) => { if (e.target !== fileInput) fileInput.click(); });
+            dropZone.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); } });
+            fileInput.addEventListener('change', () => { if (fileInput.files.length) handleFile(fileInput.files[0]); });
+            dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
             dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
             dropZone.addEventListener('drop', e => {
                 e.preventDefault();
@@ -706,85 +609,118 @@
                 selectedFile = file;
                 dropZone.classList.add('has-file');
                 fileBadge.classList.remove('hidden');
-                fileBadge.innerHTML =
-                    `📹 ${file.name} <span style="opacity:0.7;">(${(file.size/1024/1024).toFixed(1)} MB)</span>`;
+                fileBadge.innerHTML = `📹 ${file.name} <span style="opacity:0.7;">(${(file.size/1024/1024).toFixed(1)} MB)</span>`;
                 convertBtn.disabled = false;
                 resultSection.classList.add('hidden');
                 progressSection.classList.add('hidden');
-                if (outputBlobUrl) { URL.revokeObjectURL(outputBlobUrl);
-                    outputBlobUrl = null; }
+                if (outputBlobUrl) { URL.revokeObjectURL(outputBlobUrl); outputBlobUrl = null; }
                 showToast('video loaded', 'success');
             }
 
-            // ─── FFmpeg API detection ─────────────────────
-            function detectFFmpegAPI() {
-                // Try multiple possible global names for ffmpeg-wasm
-                if (typeof window.FFmpeg !== 'undefined') {
-                    logDebug('Using window.FFmpeg');
+            // ─── FFmpeg bootstrap with manual fetch ───────
+            function detectFFmpegFactory() {
+                // Try all known global shapes
+                if (typeof window.FFmpeg !== 'undefined' && typeof window.FFmpeg.createFFmpeg === 'function') {
+                    return window.FFmpeg.createFFmpeg.bind(window.FFmpeg);
+                }
+                if (typeof window.FFmpegWASM !== 'undefined' && typeof window.FFmpegWASM.createFFmpeg === 'function') {
+                    return window.FFmpegWASM.createFFmpeg.bind(window.FFmpegWASM);
+                }
+                if (typeof window.createFFmpeg === 'function') {
+                    return window.createFFmpeg;
+                }
+                // Some builds expose the constructor directly
+                if (typeof window.FFmpeg === 'function') {
                     return window.FFmpeg;
                 }
-                if (typeof window.FFmpegWASM !== 'undefined') {
-                    logDebug('Using window.FFmpegWASM');
-                    return window.FFmpegWASM;
-                }
-                // Some builds expose createFFmpeg directly
-                if (typeof window.createFFmpeg === 'function') {
-                    logDebug('Using window.createFFmpeg directly');
-                    return { createFFmpeg: window.createFFmpeg };
-                }
-                // Last resort: check if FFmpeg is in global scope without window prefix
-                try {
-                    if (typeof FFmpeg !== 'undefined') {
-                        logDebug('Using global FFmpeg (no window prefix)');
-                        return FFmpeg;
-                    }
-                } catch (e) {}
                 return null;
             }
 
-            function getCreateFFmpegFn() {
-                const api = detectFFmpegAPI();
-                if (!api) return null;
-
-                // Different versions expose createFFmpeg in different ways
-                if (typeof api.createFFmpeg === 'function') return api.createFFmpeg.bind(api);
-                if (typeof api === 'function') return api; // maybe the global itself is the factory
-
-                // Some older versions: FFmpeg is a class/constructor
-                if (typeof api === 'object' && api.createFFmpeg) return api.createFFmpeg;
-                return null;
-            }
-
-            // ─── FFmpeg initialization ────────────────────
             async function loadFFmpeg() {
                 if (ffmpegInstance?.isLoaded) return ffmpegInstance;
 
                 setEngineStatus('loading');
-                logDebug('Attempting to initialize ffmpeg...');
+                logDebug('Starting FFmpeg load...');
 
-                // Check SharedArrayBuffer availability (critical)
                 if (typeof SharedArrayBuffer === 'undefined') {
-                    const msg = 'SharedArrayBuffer is not available. ' +
-                        'This page must be served from a web server (not file://) with COOP/COEP headers. ' +
-                        'The coi-serviceworker.js helps, but only works when served via HTTP/HTTPS.';
-                    logDebug('ERROR: ' + msg);
-                    throw new Error(msg);
+                    throw new Error('SharedArrayBuffer not available. Serve via HTTPS/localhost.');
                 }
 
-                const createFFmpeg = getCreateFFmpegFn();
-                if (!createFFmpeg) {
-                    const msg = 'Could not detect ffmpeg-wasm API. ' +
-                        'Checked: window.FFmpeg, window.FFmpegWASM, window.createFFmpeg. ' +
-                        'Please ensure ffmpeg.min.js is loaded correctly and is a compatible version.';
-                    logDebug('ERROR: ' + msg);
-                    logDebug('Available globals: ' + Object.keys(window).filter(k => k.toLowerCase().includes(
-                        'ffmpeg')).join(', '));
-                    throw new Error(msg);
+                const factory = detectFFmpegFactory();
+                if (!factory) {
+                    throw new Error('Could not detect ffmpeg-wasm API (tried window.FFmpeg, window.FFmpegWASM, window.createFFmpeg).');
                 }
+
+                // ── Manual fetch of core files to bypass path issues ──
+                const basePath = './';  // same directory as this HTML
+                const coreJsPath = basePath + 'ffmpeg-core.js';
+                const coreWasmPath = basePath + 'ffmpeg-core.wasm';
+                const workerPath = basePath + 'ffmpeg-core.worker.js';
+
+                logDebug(`Fetching core JS: ${coreJsPath}`);
+                let coreJsBlobUrl, wasmBlobUrl, workerBlobUrl;
 
                 try {
-                    ffmpegInstance = createFFmpeg({
-                        corePath: './ffmpeg-core.js',
+                    // 1. Fetch core JS and create blob URL
+                    const coreJsResp = await fetch(coreJsPath);
+                    if (!coreJsResp.ok) throw new Error(`HTTP ${coreJsResp.status} for ${coreJsPath}`);
+                    const coreJsCode = await coreJsResp.text();
+                    // Rewrite relative WASM/worker paths inside the core JS to use absolute blob URLs
+                    // This ensures the core JS can locate the WASM file regardless of the page's base URL.
+                    const wasmBlobUrlPlaceholder = 'WASM_BLOB_URL_PLACEHOLDER';
+                    const workerBlobUrlPlaceholder = 'WORKER_BLOB_URL_PLACEHOLDER';
+                    let modifiedCoreJs = coreJsCode;
+
+                    // 2. Fetch WASM and create blob URL
+                    logDebug(`Fetching WASM: ${coreWasmPath}`);
+                    const wasmResp = await fetch(coreWasmPath);
+                    if (!wasmResp.ok) throw new Error(`HTTP ${wasmResp.status} for ${coreWasmPath}`);
+                    const wasmBlob = await wasmResp.blob();
+                    wasmBlobUrl = URL.createObjectURL(wasmBlob);
+                    logDebug(`WASM blob URL created: ${wasmBlobUrl}`);
+
+                    // 3. Fetch worker script if it exists (optional)
+                    try {
+                        const workerResp = await fetch(workerPath);
+                        if (workerResp.ok) {
+                            const workerBlob = await workerResp.blob();
+                            workerBlobUrl = URL.createObjectURL(workerBlob);
+                            logDebug(`Worker blob URL created: ${workerBlobUrl}`);
+                        } else {
+                            logDebug('Worker script not found, ffmpeg may create its own.');
+                        }
+                    } catch (e) {
+                        logDebug('Worker fetch failed (non-critical): ' + e.message);
+                    }
+
+                    // 4. Patch the core JS to use our blob URLs
+                    // The core JS typically does: `new URL('ffmpeg-core.wasm', import.meta.url)` or similar.
+                    // We replace the known patterns with our blob URLs.
+                    modifiedCoreJs = modifiedCoreJs.replace(
+                        /(['"`])\.\/ffmpeg-core\.wasm\1/g,
+                        `'${wasmBlobUrl}'`
+                    );
+                    if (workerBlobUrl) {
+                        modifiedCoreJs = modifiedCoreJs.replace(
+                            /(['"`])\.\/ffmpeg-core\.worker\.js\1/g,
+                            `'${workerBlobUrl}'`
+                        );
+                    }
+                    // Also handle possible absolute fallback
+                    modifiedCoreJs = modifiedCoreJs.replace(
+                        /https?:\/\/[^'"]*ffmpeg-core\.wasm/g,
+                        wasmBlobUrl
+                    );
+
+                    coreJsBlobUrl = URL.createObjectURL(new Blob([modifiedCoreJs], { type: 'application/javascript' }));
+                    logDebug(`Patched core JS blob URL created: ${coreJsBlobUrl}`);
+
+                    // 5. Create FFmpeg instance with our custom core JS URL
+                    ffmpegInstance = factory({
+                        corePath: coreJsBlobUrl,
+                        // Some versions also accept wasmPath and workerPath directly
+                        ...(wasmBlobUrl && { wasmPath: wasmBlobUrl }),
+                        ...(workerBlobUrl && { workerPath: workerBlobUrl }),
                         log: false,
                         logger: () => {},
                         progress: ({ ratio }) => {
@@ -794,14 +730,20 @@
                             }
                         }
                     });
-                    logDebug('FFmpeg instance created, loading WASM...');
+
+                    logDebug('Calling ffmpeg.load()...');
                     await ffmpegInstance.load();
                     ffmpegInstance.isLoaded = true;
-                    logDebug('FFmpeg WASM loaded successfully ✅');
+                    logDebug('✅ FFmpeg loaded successfully via manual fetch.');
                     setEngineStatus('ready');
                     return ffmpegInstance;
+
                 } catch (err) {
-                    logDebug('FFmpeg load error: ' + err.message);
+                    logDebug('❌ FFmpeg load failed: ' + err.message);
+                    // Clean up blob URLs
+                    [coreJsBlobUrl, wasmBlobUrl, workerBlobUrl].forEach(url => {
+                        if (url) URL.revokeObjectURL(url);
+                    });
                     setEngineStatus('error');
                     throw err;
                 }
@@ -812,14 +754,12 @@
                 if (!selectedFile || isConverting) return;
                 isConverting = true;
                 convertBtn.disabled = true;
-                convertBtn.innerHTML =
-                    '<span class="dot" style="display:inline-block; width:8px; height:8px; background:var(--bg); border-radius:1px;"></span> converting…';
+                convertBtn.innerHTML = '<span style="display:inline-block;width:8px;height:8px;background:var(--bg);border-radius:1px;"></span> converting…';
                 progressSection.classList.remove('hidden');
                 resultSection.classList.add('hidden');
                 progressFill.style.width = '0%';
                 progressLabel.textContent = 'loading ffmpeg…';
-                if (outputBlobUrl) { URL.revokeObjectURL(outputBlobUrl);
-                    outputBlobUrl = null; }
+                if (outputBlobUrl) { URL.revokeObjectURL(outputBlobUrl); outputBlobUrl = null; }
 
                 const inputName = 'input.' + (selectedFile.name.split('.').pop() || 'mp4');
                 const outputName = 'output.gif';
@@ -852,8 +792,7 @@
                     }
                     args.push('-i', inputName);
                     const ditherMethod = dither ? 'bayer:bayer_scale=5' : 'none';
-                    const filter =
-                        `fps=${fps},scale=${width}:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=${colors}:stats_mode=diff[p];[s1][p]paletteuse=dither=${ditherMethod}`;
+                    const filter = `fps=${fps},scale=${width}:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=${colors}:stats_mode=diff[p];[s1][p]paletteuse=dither=${ditherMethod}`;
                     args.push('-vf', filter, '-loop', '0', '-f', 'gif', '-y', outputName);
 
                     const startTime = performance.now();
@@ -875,7 +814,6 @@
                     resultSection.classList.remove('hidden');
                     progressSection.classList.add('hidden');
                     showToast('gif ready', 'success');
-                    // Clean up virtual filesystem
                     try { ffmpeg.FS('unlink', inputName); } catch (e) {}
                     try { ffmpeg.FS('unlink', outputName); } catch (e) {}
                 } catch (err) {
@@ -908,26 +846,21 @@
             newConvertBtn.addEventListener('click', () => {
                 resultSection.classList.add('hidden');
                 progressSection.classList.add('hidden');
-                if (outputBlobUrl) { URL.revokeObjectURL(outputBlobUrl);
-                    outputBlobUrl = null; }
+                if (outputBlobUrl) { URL.revokeObjectURL(outputBlobUrl); outputBlobUrl = null; }
                 resultGif.src = '';
                 window.scrollTo({ top: 0, behavior: 'smooth' });
             });
 
-            // ─── Initial diagnostics ──────────────────────
+            // Initial check
             if (typeof SharedArrayBuffer === 'undefined') {
                 showToast('⚠️ SharedArrayBuffer missing – serve via HTTPS/localhost', 'error');
-                logDebug('WARNING: SharedArrayBuffer unavailable. ffmpeg-wasm will not work.');
-                logDebug('Make sure you are running this from a web server (e.g., npx serve .) not file://');
             }
-
-            const api = detectFFmpegAPI();
-            if (api) {
-                logDebug('ffmpeg API detected successfully on page load.');
+            const factory = detectFFmpegFactory();
+            if (factory) {
+                logDebug('ffmpeg API detected. Ready to load on first convert.');
                 setEngineStatus('ready');
             } else {
-                logDebug('ffmpeg API NOT detected on page load. Will retry when Convert is clicked.');
-                logDebug('Check that ffmpeg.min.js is in the same directory and is a valid UMD build.');
+                logDebug('ffmpeg API NOT detected. Check that ffmpeg.min.js is loaded.');
             }
         })();
     </script>

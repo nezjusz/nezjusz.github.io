@@ -7,6 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600&display=swap" rel="stylesheet">
+    <!-- COI Service Worker must be registered first for SharedArrayBuffer -->
     <script src="coi-serviceworker.js"></script>
     <style>
         :root {
@@ -415,6 +416,19 @@
             margin-top: 0.25rem;
         }
 
+        /* Debug info banner */
+        .debug-info {
+            background: var(--bg-alt);
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            padding: 0.8rem 1rem;
+            font-family: var(--font-mono);
+            font-size: 0.7rem;
+            color: var(--text-dim);
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
         @media (max-width: 500px) {
             .panel {
                 padding: 1rem;
@@ -442,7 +456,7 @@
 
     <div style="width: 100%; max-width: 620px; display: flex; flex-direction: column; gap: 1.2rem;">
         <!-- Header -->
-        <div style="display: flex; align-items: center; justify-content: space-between;">
+        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem;">
             <div>
                 <h1 style="font-weight: 600; font-size: 1.8rem; letter-spacing: -0.02em; margin-bottom: 0.1rem;">
                     video <span style="color: var(--amber);">→</span> gif
@@ -453,6 +467,9 @@
                 <span class="dot"></span> ffmpeg idle
             </div>
         </div>
+
+        <!-- Debug info (hidden by default, shown if errors occur) -->
+        <div id="debugPanel" class="debug-info hidden"></div>
 
         <!-- Upload -->
         <div class="panel">
@@ -542,9 +559,28 @@
     <!-- Toast container -->
     <div id="toastContainer" style="position: fixed; top: 20px; right: 20px; z-index: 999; display: flex; flex-direction: column; gap: 0.5rem;"></div>
 
+    <!-- Load ffmpeg.wasm (must be loaded before our script) -->
     <script src="ffmpeg.min.js"></script>
     <script>
         (function() {
+            // ─── Debug & diagnostics ──────────────────────
+            const debugPanel = document.getElementById('debugPanel');
+
+            function logDebug(msg) {
+                console.log('[ffmpeg-gif]', msg);
+                debugPanel.classList.remove('hidden');
+                debugPanel.textContent += msg + '\n';
+            }
+
+            // Check environment on startup
+            logDebug('Environment check:');
+            logDebug('  SharedArrayBuffer: ' + (typeof SharedArrayBuffer !== 'undefined' ? '✅ available' :
+                '❌ missing (required!)'));
+            logDebug('  window.FFmpeg: ' + (typeof window.FFmpeg !== 'undefined' ? '✅ found' : '❌ not found'));
+            logDebug('  window.FFmpegWASM: ' + (typeof window.FFmpegWASM !== 'undefined' ? '✅ found' : '❌ not found'));
+            logDebug('  window.createFFmpeg: ' + (typeof window.createFFmpeg !== 'undefined' ? '✅ found' :
+                '❌ not found'));
+
             // ─── DOM references ───────────────────────────
             const dropZone = document.getElementById('dropZone');
             const fileInput = document.getElementById('fileInput');
@@ -618,17 +654,8 @@
                 });
             }
             setupToggle(ditherToggle);
-            let trimEnabled = false;
-            setupToggle({
-                classList: { contains: () => trimEnabled },
-                addEventListener: (_, fn) => advToggleBtn.addEventListener('click', () => {
-                    trimEnabled = !trimEnabled;
-                    advPanel.classList.toggle('hidden', !trimEnabled);
-                    advToggleBtn.classList.toggle('is-open', trimEnabled);
-                    fn(trimEnabled);
-                })
-            }); // simplified; we'll just handle directly
 
+            let trimEnabled = false;
             advToggleBtn.addEventListener('click', () => {
                 trimEnabled = !trimEnabled;
                 advPanel.classList.toggle('hidden', !trimEnabled);
@@ -679,7 +706,8 @@
                 selectedFile = file;
                 dropZone.classList.add('has-file');
                 fileBadge.classList.remove('hidden');
-                fileBadge.innerHTML = `📹 ${file.name} <span style="opacity:0.7;">(${(file.size/1024/1024).toFixed(1)} MB)</span>`;
+                fileBadge.innerHTML =
+                    `📹 ${file.name} <span style="opacity:0.7;">(${(file.size/1024/1024).toFixed(1)} MB)</span>`;
                 convertBtn.disabled = false;
                 resultSection.classList.add('hidden');
                 progressSection.classList.add('hidden');
@@ -688,27 +716,95 @@
                 showToast('video loaded', 'success');
             }
 
-            // ─── FFmpeg init ──────────────────────────────
+            // ─── FFmpeg API detection ─────────────────────
+            function detectFFmpegAPI() {
+                // Try multiple possible global names for ffmpeg-wasm
+                if (typeof window.FFmpeg !== 'undefined') {
+                    logDebug('Using window.FFmpeg');
+                    return window.FFmpeg;
+                }
+                if (typeof window.FFmpegWASM !== 'undefined') {
+                    logDebug('Using window.FFmpegWASM');
+                    return window.FFmpegWASM;
+                }
+                // Some builds expose createFFmpeg directly
+                if (typeof window.createFFmpeg === 'function') {
+                    logDebug('Using window.createFFmpeg directly');
+                    return { createFFmpeg: window.createFFmpeg };
+                }
+                // Last resort: check if FFmpeg is in global scope without window prefix
+                try {
+                    if (typeof FFmpeg !== 'undefined') {
+                        logDebug('Using global FFmpeg (no window prefix)');
+                        return FFmpeg;
+                    }
+                } catch (e) {}
+                return null;
+            }
+
+            function getCreateFFmpegFn() {
+                const api = detectFFmpegAPI();
+                if (!api) return null;
+
+                // Different versions expose createFFmpeg in different ways
+                if (typeof api.createFFmpeg === 'function') return api.createFFmpeg.bind(api);
+                if (typeof api === 'function') return api; // maybe the global itself is the factory
+
+                // Some older versions: FFmpeg is a class/constructor
+                if (typeof api === 'object' && api.createFFmpeg) return api.createFFmpeg;
+                return null;
+            }
+
+            // ─── FFmpeg initialization ────────────────────
             async function loadFFmpeg() {
                 if (ffmpegInstance?.isLoaded) return ffmpegInstance;
+
                 setEngineStatus('loading');
-                if (!window.FFmpegWASM) throw new Error('FFmpegWASM not loaded. Check ffmpeg.min.js');
-                const { createFFmpeg } = window.FFmpegWASM;
-                ffmpegInstance = createFFmpeg({
-                    corePath: './ffmpeg-core.js',
-                    log: false,
-                    logger: () => {},
-                    progress: ({ ratio }) => {
-                        if (isConverting && ratio >= 0 && ratio <= 1) {
-                            progressFill.style.width = Math.round(ratio * 100) + '%';
-                            progressLabel.textContent = `processing… ${Math.round(ratio * 100)}%`;
+                logDebug('Attempting to initialize ffmpeg...');
+
+                // Check SharedArrayBuffer availability (critical)
+                if (typeof SharedArrayBuffer === 'undefined') {
+                    const msg = 'SharedArrayBuffer is not available. ' +
+                        'This page must be served from a web server (not file://) with COOP/COEP headers. ' +
+                        'The coi-serviceworker.js helps, but only works when served via HTTP/HTTPS.';
+                    logDebug('ERROR: ' + msg);
+                    throw new Error(msg);
+                }
+
+                const createFFmpeg = getCreateFFmpegFn();
+                if (!createFFmpeg) {
+                    const msg = 'Could not detect ffmpeg-wasm API. ' +
+                        'Checked: window.FFmpeg, window.FFmpegWASM, window.createFFmpeg. ' +
+                        'Please ensure ffmpeg.min.js is loaded correctly and is a compatible version.';
+                    logDebug('ERROR: ' + msg);
+                    logDebug('Available globals: ' + Object.keys(window).filter(k => k.toLowerCase().includes(
+                        'ffmpeg')).join(', '));
+                    throw new Error(msg);
+                }
+
+                try {
+                    ffmpegInstance = createFFmpeg({
+                        corePath: './ffmpeg-core.js',
+                        log: false,
+                        logger: () => {},
+                        progress: ({ ratio }) => {
+                            if (isConverting && ratio >= 0 && ratio <= 1) {
+                                progressFill.style.width = Math.round(ratio * 100) + '%';
+                                progressLabel.textContent = `processing… ${Math.round(ratio * 100)}%`;
+                            }
                         }
-                    }
-                });
-                await ffmpegInstance.load();
-                ffmpegInstance.isLoaded = true;
-                setEngineStatus('ready');
-                return ffmpegInstance;
+                    });
+                    logDebug('FFmpeg instance created, loading WASM...');
+                    await ffmpegInstance.load();
+                    ffmpegInstance.isLoaded = true;
+                    logDebug('FFmpeg WASM loaded successfully ✅');
+                    setEngineStatus('ready');
+                    return ffmpegInstance;
+                } catch (err) {
+                    logDebug('FFmpeg load error: ' + err.message);
+                    setEngineStatus('error');
+                    throw err;
+                }
             }
 
             // ─── Conversion ───────────────────────────────
@@ -716,7 +812,8 @@
                 if (!selectedFile || isConverting) return;
                 isConverting = true;
                 convertBtn.disabled = true;
-                convertBtn.innerHTML = '<span class="dot" style="display:inline-block; width:8px; height:8px; background:var(--bg); border-radius:1px;"></span> converting…';
+                convertBtn.innerHTML =
+                    '<span class="dot" style="display:inline-block; width:8px; height:8px; background:var(--bg); border-radius:1px;"></span> converting…';
                 progressSection.classList.remove('hidden');
                 resultSection.classList.add('hidden');
                 progressFill.style.width = '0%';
@@ -731,6 +828,7 @@
                     ffmpeg = await loadFFmpeg();
                 } catch (err) {
                     showToast('ffmpeg load failed: ' + err.message, 'error');
+                    logDebug('Conversion aborted: ' + err.message);
                     resetUI();
                     return;
                 }
@@ -745,9 +843,8 @@
                     const width = widthSlider.value;
                     const colors = colorsSlider.value;
                     const dither = ditherToggle.classList.contains('is-on');
-                    const trimActive = trimEnabled;
                     const args = [];
-                    if (trimActive) {
+                    if (trimEnabled) {
                         const start = trimStart.value || 0;
                         const dur = trimDuration.value || 5;
                         if (start > 0) args.push('-ss', start.toString());
@@ -755,8 +852,10 @@
                     }
                     args.push('-i', inputName);
                     const ditherMethod = dither ? 'bayer:bayer_scale=5' : 'none';
-                    const filter = `fps=${fps},scale=${width}:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=${colors}:stats_mode=diff[p];[s1][p]paletteuse=dither=${ditherMethod}`;
+                    const filter =
+                        `fps=${fps},scale=${width}:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=${colors}:stats_mode=diff[p];[s1][p]paletteuse=dither=${ditherMethod}`;
                     args.push('-vf', filter, '-loop', '0', '-f', 'gif', '-y', outputName);
+
                     const startTime = performance.now();
                     await ffmpeg.run(...args);
                     const elapsed = ((performance.now() - startTime) / 1000).toFixed(1);
@@ -776,13 +875,15 @@
                     resultSection.classList.remove('hidden');
                     progressSection.classList.add('hidden');
                     showToast('gif ready', 'success');
-                    ffmpeg.FS('unlink', inputName);
-                    ffmpeg.FS('unlink', outputName);
+                    // Clean up virtual filesystem
+                    try { ffmpeg.FS('unlink', inputName); } catch (e) {}
+                    try { ffmpeg.FS('unlink', outputName); } catch (e) {}
                 } catch (err) {
                     showToast('conversion error: ' + err.message, 'error');
+                    logDebug('Conversion error: ' + err.message);
                     progressSection.classList.add('hidden');
-                    try { ffmpeg.FS('unlink', inputName);
-                        ffmpeg.FS('unlink', outputName); } catch (e) {}
+                    try { ffmpeg.FS('unlink', inputName); } catch (e) {}
+                    try { ffmpeg.FS('unlink', outputName); } catch (e) {}
                 } finally {
                     resetUI();
                 }
@@ -813,9 +914,20 @@
                 window.scrollTo({ top: 0, behavior: 'smooth' });
             });
 
-            // Check SharedArrayBuffer
+            // ─── Initial diagnostics ──────────────────────
             if (typeof SharedArrayBuffer === 'undefined') {
                 showToast('⚠️ SharedArrayBuffer missing – serve via HTTPS/localhost', 'error');
+                logDebug('WARNING: SharedArrayBuffer unavailable. ffmpeg-wasm will not work.');
+                logDebug('Make sure you are running this from a web server (e.g., npx serve .) not file://');
+            }
+
+            const api = detectFFmpegAPI();
+            if (api) {
+                logDebug('ffmpeg API detected successfully on page load.');
+                setEngineStatus('ready');
+            } else {
+                logDebug('ffmpeg API NOT detected on page load. Will retry when Convert is clicked.');
+                logDebug('Check that ffmpeg.min.js is in the same directory and is a valid UMD build.');
             }
         })();
     </script>

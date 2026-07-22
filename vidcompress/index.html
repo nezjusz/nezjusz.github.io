@@ -323,7 +323,7 @@
                         </button>
                     </div>
                     <div id="customSizeRow" class="custom-size-row hidden flex items-center gap-2">
-                        <input type="number" id="customSizeInput" min="1" max="2000" step="1" placeholder="Target size" inputmode="numeric">
+                        <input type="text" id="customSizeInput" inputmode="decimal" placeholder="Target size">
                         <span class="mono text-xs" style="color:var(--text-dim)">MB</span>
                     </div>
                     <div id="lowSizeWarning" class="warn-banner hidden flex items-start gap-3">
@@ -441,6 +441,11 @@
             lowSizeWarning.classList.toggle('hidden', !(selectedTargetSizeMB < 4));
         }
 
+        // Formats the target size for the filename, e.g. 8, 8.5, 12.25 — no trailing zeros
+        function formatSizeForFilename(sizeMB) {
+            return parseFloat(sizeMB.toFixed(2)).toString();
+        }
+
         // Shows or hides the large-file / long-clip warning. durationSec is
         // optional — called once immediately with just the file size, then
         // again once the clip's duration has loaded.
@@ -546,18 +551,25 @@
                     customSizeRow.classList.remove('hidden');
                     customSizeInput.focus();
                     if (customSizeInput.value) {
-                        selectedTargetSizeMB = parseInt(customSizeInput.value);
+                        selectedTargetSizeMB = parseFloat(customSizeInput.value);
                     }
                 } else {
                     customSizeRow.classList.add('hidden');
-                    selectedTargetSizeMB = parseInt(btn.dataset.size);
+                    selectedTargetSizeMB = parseFloat(btn.dataset.size);
                 }
                 updateLowSizeWarning();
             });
         });
 
+        // Only allow digits and a single decimal separator (dot or comma,
+        // whichever ffmpeg's target-size math can use once normalized to a dot)
         customSizeInput.addEventListener('input', () => {
-            const value = parseInt(customSizeInput.value);
+            let raw = customSizeInput.value.replace(',', '.').replace(/[^0-9.]/g, '');
+            const parts = raw.split('.');
+            if (parts.length > 2) raw = parts[0] + '.' + parts.slice(1).join('');
+            customSizeInput.value = raw;
+
+            const value = parseFloat(raw);
             if (value > 0) {
                 selectedTargetSizeMB = value;
                 updateLowSizeWarning();
@@ -571,7 +583,7 @@
                 return;
             }
             if (!selectedFile || videoDurationSec === 0) return;
-            if (customSizeBtn.classList.contains('is-selected') && !(parseInt(customSizeInput.value) > 0)) {
+            if (customSizeBtn.classList.contains('is-selected') && !(parseFloat(customSizeInput.value) > 0)) {
                 alert('Enter a target size in MB first.');
                 customSizeInput.focus();
                 return;
@@ -643,7 +655,7 @@
                 const downloadUrl = URL.createObjectURL(compressedBlob);
 
                 downloadBtn.href = downloadUrl;
-                downloadBtn.download = `8mb-compressed-${randomSuffix(8)}.mp4`;
+                downloadBtn.download = `${formatSizeForFilename(selectedTargetSizeMB)}mb-compressed-${randomSuffix(8)}.mp4`;
 
                 compressBtn.classList.add('hidden');
                 compressBtn.disabled = false;

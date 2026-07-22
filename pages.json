@@ -13,6 +13,6 @@
     },
     {
         "name": "Video Compression Tool",
-        "url": "./8mbvidcompress/"
+        "url": "./vidcompress/"
     }
 ]

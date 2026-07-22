@@ -331,7 +331,7 @@
 
     <!-- Footer -->
     <footer class="text-center py-6 text-xs mono max-w-xl mx-auto w-full border-t" style="color: var(--text-dim); border-color: rgba(0,0,0,0.3);">
-        Powered locally by FFmpeg.wasm — no data ever leaves your computer.
+        Powered locally by FFmpeg.wasm — no data ever leaves your computer, and embedded metadata is stripped from every export.
     </footer>
 
     <!-- Application Script -->
@@ -550,13 +550,15 @@
 
             try {
                 // Single-pass encode: force one video + one audio stream, a
-                // keyframe every 2s at 30fps, and downscale to 720p for
-                // reliable playback across devices.
+                // keyframe every 2s at 30fps, downscale to 720p for reliable
+                // playback across devices, and drop embedded metadata (GPS
+                // location, device model, timestamps) for privacy.
                 await ffmpeg.run(
                     '-i', inputName,
                     '-threads', '2',
                     '-map', '0:v:0',
                     '-map', '0:a:0?',
+                    '-map_metadata', '-1',
                     '-b:v', `${videoBitrateK}k`,
                     '-c:v', 'libx264',
                     '-preset', 'veryfast',

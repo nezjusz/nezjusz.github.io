@@ -150,6 +150,31 @@
         }
         .warn-banner svg { color: var(--amber); flex-shrink: 0; margin-top: 1px; }
 
+        /* Toggle switch */
+        .toggle-switch {
+            position: relative;
+            width: 38px;
+            height: 22px;
+            border-radius: 999px;
+            background: var(--bg-alt);
+            border: 1px solid var(--line);
+            flex-shrink: 0;
+            cursor: pointer;
+            transition: background 0.15s ease, border-color 0.15s ease;
+        }
+        .toggle-switch .thumb {
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: var(--text-dim);
+            transition: transform 0.15s ease, background 0.15s ease;
+        }
+        .toggle-switch.is-on { background: var(--amber-dim); border-color: rgba(255, 180, 84, 0.4); }
+        .toggle-switch.is-on .thumb { transform: translateX(16px); background: var(--amber); }
+
         /* Progress meter styled like a ladder of bitrate ticks rather than a plain gradient bar */
         .tick-track {
             width: 100%;
@@ -309,6 +334,17 @@
                     </div>
                 </div>
 
+                <!-- Privacy Options -->
+                <div class="flex items-center justify-between gap-3 py-1">
+                    <div>
+                        <p class="text-sm font-medium">Remove EXIF metadata</p>
+                        <p class="text-xs" style="color:var(--text-dim)">Strips GPS, device, and timestamp data from the export.</p>
+                    </div>
+                    <button id="metadataToggle" type="button" role="switch" aria-checked="true" aria-label="Remove EXIF metadata" class="toggle-switch is-on">
+                        <span class="thumb"></span>
+                    </button>
+                </div>
+
                 <!-- Progress Section -->
                 <div id="progressContainer" class="hidden space-y-3 p-4 rounded-lg border" style="background: var(--bg-alt); border-color: var(--line);">
                     <div class="flex justify-between items-center text-xs mono">
@@ -368,6 +404,7 @@
         const sizeWarning = document.getElementById('sizeWarning');
         const sizeWarningText = document.getElementById('sizeWarningText');
         const lowSizeWarning = document.getElementById('lowSizeWarning');
+        const metadataToggle = document.getElementById('metadataToggle');
         const compressBtn = document.getElementById('compressBtn');
         const downloadBtn = document.getElementById('downloadBtn');
         const progressContainer = document.getElementById('progressContainer');
@@ -378,6 +415,13 @@
         let selectedFile = null;
         let selectedTargetSizeMB = 8;
         let videoDurationSec = 0;
+        let removeMetadata = true;
+
+        metadataToggle.addEventListener('click', () => {
+            removeMetadata = !removeMetadata;
+            metadataToggle.classList.toggle('is-on', removeMetadata);
+            metadataToggle.setAttribute('aria-checked', String(removeMetadata));
+        });
 
         const LARGE_FILE_BYTES = 500 * 1024 * 1024; // 500 MB
         const LONG_CLIP_SECONDS = 5 * 60; // 5 minutes
@@ -565,15 +609,20 @@
 
             try {
                 // Single-pass encode: force one video + one audio stream, a
-                // keyframe every 2s at 30fps, downscale to 720p for reliable
-                // playback across devices, and drop embedded metadata (GPS
-                // location, device model, timestamps) for privacy.
-                await ffmpeg.run(
+                // keyframe every 2s at 30fps, and downscale to 720p for
+                // reliable playback across devices. Metadata (GPS location,
+                // device model, timestamps) is dropped unless the person has
+                // turned that off.
+                const ffmpegArgs = [
                     '-i', inputName,
                     '-threads', '2',
                     '-map', '0:v:0',
                     '-map', '0:a:0?',
-                    '-map_metadata', '-1',
+                ];
+                if (removeMetadata) {
+                    ffmpegArgs.push('-map_metadata', '-1');
+                }
+                ffmpegArgs.push(
                     '-b:v', `${videoBitrateK}k`,
                     '-c:v', 'libx264',
                     '-preset', 'veryfast',
@@ -587,6 +636,7 @@
                     '-movflags', '+faststart',
                     outputName
                 );
+                await ffmpeg.run(...ffmpegArgs);
 
                 const data = ffmpeg.FS('readFile', outputName);
                 const compressedBlob = new Blob([data.buffer], { type: 'video/mp4' });

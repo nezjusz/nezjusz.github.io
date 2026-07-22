@@ -176,6 +176,58 @@
         .toggle-switch.is-on { background: var(--amber-dim); border-color: rgba(255, 180, 84, 0.4); }
         .toggle-switch.is-on .thumb { transform: translateX(16px); background: var(--amber); }
 
+        /* Advanced settings disclosure */
+        .adv-toggle {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            width: 100%;
+            padding: 0.6rem 0.1rem;
+            background: transparent;
+            border: none;
+            color: var(--text-dim);
+            cursor: pointer;
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+        }
+        .adv-toggle:hover { color: var(--text); }
+        .adv-toggle svg { width: 14px; height: 14px; transition: transform 0.15s ease; }
+        .adv-toggle.is-open svg { transform: rotate(180deg); }
+
+        .adv-panel {
+            border-top: 1px solid var(--line);
+            padding-top: 0.9rem;
+            gap: 0.75rem;
+        }
+        .adv-field label {
+            display: block;
+            font-family: var(--font-mono);
+            font-size: 0.68rem;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            color: var(--text-dim);
+            margin-bottom: 0.4rem;
+        }
+        .adv-field select {
+            width: 100%;
+            background: var(--bg-alt);
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            color: var(--text);
+            font-family: var(--font-mono);
+            font-size: 0.82rem;
+            padding: 0.5rem 0.5rem;
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%239c948a' stroke-width='2'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 0.5rem center;
+            background-size: 14px;
+            padding-right: 1.75rem;
+        }
+        .adv-field select:focus { border-color: var(--amber); outline: none; }
+
         /* Progress meter styled like a ladder of bitrate ticks rather than a plain gradient bar */
         .tick-track {
             width: 100%;
@@ -346,6 +398,45 @@
                     </button>
                 </div>
 
+                <!-- Advanced Settings -->
+                <div>
+                    <button id="advancedToggleBtn" type="button" class="adv-toggle" aria-expanded="false" aria-controls="advancedPanel">
+                        Advanced settings
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+                        </svg>
+                    </button>
+                    <div id="advancedPanel" class="adv-panel hidden grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div class="adv-field">
+                            <label for="fpsSelect">Frame rate</label>
+                            <select id="fpsSelect">
+                                <option value="original">Original</option>
+                                <option value="15">15 fps</option>
+                                <option value="24">24 fps</option>
+                                <option value="30" selected>30 fps</option>
+                                <option value="60">60 fps</option>
+                            </select>
+                        </div>
+                        <div class="adv-field">
+                            <label for="resolutionSelect">Resolution</label>
+                            <select id="resolutionSelect">
+                                <option value="original">Original</option>
+                                <option value="480">480p</option>
+                                <option value="720" selected>720p</option>
+                                <option value="1080">1080p</option>
+                            </select>
+                        </div>
+                        <div class="adv-field">
+                            <label for="speedSelect">Encode speed</label>
+                            <select id="speedSelect">
+                                <option value="ultrafast">Fastest</option>
+                                <option value="veryfast" selected>Balanced</option>
+                                <option value="medium">Best quality</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Progress Section -->
                 <div id="progressContainer" class="hidden space-y-3 p-4 rounded-lg border" style="background: var(--bg-alt); border-color: var(--line);">
                     <div class="flex justify-between items-center text-xs mono">
@@ -406,6 +497,11 @@
         const sizeWarningText = document.getElementById('sizeWarningText');
         const lowSizeWarning = document.getElementById('lowSizeWarning');
         const metadataToggle = document.getElementById('metadataToggle');
+        const advancedToggleBtn = document.getElementById('advancedToggleBtn');
+        const advancedPanel = document.getElementById('advancedPanel');
+        const fpsSelect = document.getElementById('fpsSelect');
+        const resolutionSelect = document.getElementById('resolutionSelect');
+        const speedSelect = document.getElementById('speedSelect');
         const compressBtn = document.getElementById('compressBtn');
         const downloadBtn = document.getElementById('downloadBtn');
         const progressContainer = document.getElementById('progressContainer');
@@ -422,6 +518,12 @@
             removeMetadata = !removeMetadata;
             metadataToggle.classList.toggle('is-on', removeMetadata);
             metadataToggle.setAttribute('aria-checked', String(removeMetadata));
+        });
+
+        advancedToggleBtn.addEventListener('click', () => {
+            const isOpen = advancedPanel.classList.toggle('hidden') === false;
+            advancedToggleBtn.classList.toggle('is-open', isOpen);
+            advancedToggleBtn.setAttribute('aria-expanded', String(isOpen));
         });
 
         const LARGE_FILE_BYTES = 500 * 1024 * 1024; // 500 MB
@@ -620,12 +722,27 @@
 
             ffmpeg.FS('writeFile', inputName, await fetchFile(selectedFile));
 
+            // Advanced settings: frame rate, resolution and encode speed.
+            // Keyframes are held to roughly one every 2 seconds regardless
+            // of the chosen frame rate.
+            const chosenFps = fpsSelect.value;
+            const chosenResolution = resolutionSelect.value;
+            const chosenPreset = speedSelect.value;
+            const gopSize = (chosenFps === 'original' ? 30 : parseInt(chosenFps)) * 2;
+
+            const vfParts = [];
+            if (chosenResolution !== 'original') {
+                vfParts.push(`scale=-2:${chosenResolution}`);
+            }
+            if (chosenFps !== 'original') {
+                vfParts.push(`fps=${chosenFps}`);
+            }
+
             try {
-                // Single-pass encode: force one video + one audio stream, a
-                // keyframe every 2s at 30fps, and downscale to 720p for
-                // reliable playback across devices. Metadata (GPS location,
-                // device model, timestamps) is dropped unless the person has
-                // turned that off.
+                // Single-pass encode: force one video + one audio stream and
+                // apply the chosen frame rate / resolution / encode speed.
+                // Metadata (GPS location, device model, timestamps) is
+                // dropped unless the person has turned that off.
                 const ffmpegArgs = [
                     '-i', inputName,
                     '-threads', '2',
@@ -638,12 +755,16 @@
                 ffmpegArgs.push(
                     '-b:v', `${videoBitrateK}k`,
                     '-c:v', 'libx264',
-                    '-preset', 'veryfast',
-                    '-g', '60',
+                    '-preset', chosenPreset,
+                    '-g', String(gopSize),
                     '-profile:v', 'high',
                     '-level', '4.0',
                     '-pix_fmt', 'yuv420p',
-                    '-vf', 'scale=1280:-2,fps=30',
+                );
+                if (vfParts.length > 0) {
+                    ffmpegArgs.push('-vf', vfParts.join(','));
+                }
+                ffmpegArgs.push(
                     '-b:a', `${audioBitrateK}k`,
                     '-c:a', 'aac',
                     '-movflags', '+faststart',

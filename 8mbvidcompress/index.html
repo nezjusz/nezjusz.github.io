@@ -300,6 +300,12 @@
                         <input type="number" id="customSizeInput" min="1" max="2000" step="1" placeholder="Target size" inputmode="numeric">
                         <span class="mono text-xs" style="color:var(--text-dim)">MB</span>
                     </div>
+                    <div id="lowSizeWarning" class="warn-banner hidden flex items-start gap-3">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.75" stroke="currentColor" class="w-4 h-4">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m0 3.75h.008v.008H12v-.008ZM21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                        </svg>
+                        <p>Targets under 4 MB leave very little bitrate to work with — expect visibly lower quality, especially on longer clips.</p>
+                    </div>
                 </div>
 
                 <!-- Progress Section -->
@@ -360,6 +366,7 @@
         const customSizeInput = document.getElementById('customSizeInput');
         const sizeWarning = document.getElementById('sizeWarning');
         const sizeWarningText = document.getElementById('sizeWarningText');
+        const lowSizeWarning = document.getElementById('lowSizeWarning');
         const compressBtn = document.getElementById('compressBtn');
         const downloadBtn = document.getElementById('downloadBtn');
         const progressContainer = document.getElementById('progressContainer');
@@ -382,6 +389,11 @@
                 result += chars[Math.floor(Math.random() * chars.length)];
             }
             return result;
+        }
+
+        // Shows a warning when the chosen target size is under 4 MB
+        function updateLowSizeWarning() {
+            lowSizeWarning.classList.toggle('hidden', !(selectedTargetSizeMB < 4));
         }
 
         // Shows or hides the large-file / long-clip warning. durationSec is
@@ -495,6 +507,7 @@
                     customSizeRow.classList.add('hidden');
                     selectedTargetSizeMB = parseInt(btn.dataset.size);
                 }
+                updateLowSizeWarning();
             });
         });
 
@@ -502,6 +515,7 @@
             const value = parseInt(customSizeInput.value);
             if (value > 0) {
                 selectedTargetSizeMB = value;
+                updateLowSizeWarning();
             }
         });
 

@@ -1,0 +1,884 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script src="coi-serviceworker.js"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>vidcompress // Local Video Compressor</title>
+    <link rel="icon" type="image/png" href="favicon.ico">
+
+    <!-- Tailwind CSS (utility layer) -->
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+
+    <!-- Fonts: Space Grotesk for display, IBM Plex Mono for data / labels -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+    <!-- Local FFmpeg script -->
+    <script src="./ffmpeg.min.js"></script>
+
+    <style>
+        :root {
+            --bg: #0f0d0b;
+            --bg-alt: #17140f;
+            --panel: rgba(247, 240, 227, 0.035);
+            --line: rgba(247, 240, 227, 0.10);
+            --line-strong: rgba(247, 240, 227, 0.22);
+            --text: #f4efe6;
+            --text-dim: #9c948a;
+            --amber: #ffb454;
+            --amber-dim: rgba(255, 180, 84, 0.14);
+            --cyan: #6fe6d8;
+            --cyan-dim: rgba(111, 230, 216, 0.14);
+            --danger: #ff6b6b;
+            --font-display: 'Space Grotesk', sans-serif;
+            --font-mono: 'IBM Plex Mono', monospace;
+        }
+
+        * { scrollbar-color: var(--line-strong) transparent; }
+
+        body {
+            background: var(--bg);
+            font-family: var(--font-display);
+            color: var(--text);
+        }
+
+        .mono { font-family: var(--font-mono); letter-spacing: 0.01em; }
+
+        /* Faint scanline + grid texture, standing in for a scope/monitor surface */
+        .scope-field {
+            position: fixed;
+            inset: 0;
+            z-index: -10;
+            pointer-events: none;
+            background-image:
+                repeating-linear-gradient(to bottom, rgba(247,240,227,0.025) 0px, rgba(247,240,227,0.025) 1px, transparent 1px, transparent 3px),
+                radial-gradient(circle at 20% 15%, var(--amber-dim), transparent 40%),
+                radial-gradient(circle at 82% 85%, var(--cyan-dim), transparent 42%);
+        }
+
+        .panel {
+            background: var(--panel);
+            border: 1px solid var(--line);
+            backdrop-filter: blur(10px);
+        }
+
+        /* Tally-light style status badge, swapped between states via className in JS */
+        .status-badge {
+            font-family: var(--font-mono);
+            font-size: 0.7rem;
+            font-weight: 500;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            padding: 0.4rem 0.75rem;
+            border-radius: 3px;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            border: 1px solid var(--line);
+        }
+        .status-badge .dot { width: 7px; height: 7px; border-radius: 1px; flex-shrink: 0; }
+
+        .status-init { color: var(--amber); background: var(--amber-dim); border-color: rgba(255,180,84,0.3); }
+        .status-init .dot { background: var(--amber); animation: blink 1.2s ease-in-out infinite; }
+
+        .status-ready { color: var(--cyan); background: var(--cyan-dim); border-color: rgba(111,230,216,0.3); }
+        .status-ready .dot { background: var(--cyan); }
+
+        .status-error { color: var(--danger); background: rgba(255,107,107,0.1); border-color: rgba(255,107,107,0.3); }
+        .status-error .dot { background: var(--danger); }
+
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+
+        /* Viewfinder-style corner marks on the drop zone, evoking a camera / slate frame */
+        .frame-corner { position: absolute; width: 16px; height: 16px; border-color: var(--line-strong); transition: border-color 0.2s ease; }
+        .frame-corner.tl { top: 10px; left: 10px; border-top: 2px solid; border-left: 2px solid; }
+        .frame-corner.tr { top: 10px; right: 10px; border-top: 2px solid; border-right: 2px solid; }
+        .frame-corner.bl { bottom: 10px; left: 10px; border-bottom: 2px solid; border-left: 2px solid; }
+        .frame-corner.br { bottom: 10px; right: 10px; border-bottom: 2px solid; border-right: 2px solid; }
+        .drop-zone:hover .frame-corner, .drop-zone.drag-over .frame-corner { border-color: var(--amber); }
+
+        /* Size selector rendered as a small level-meter, one bar per option */
+        .size-opt {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.6rem;
+            padding: 0.85rem 0.25rem 0.7rem;
+            border-radius: 6px;
+            border: 1px solid var(--line);
+            background: transparent;
+            transition: border-color 0.15s ease, background 0.15s ease;
+            cursor: pointer;
+        }
+        .size-opt:hover { border-color: var(--line-strong); }
+        .size-opt .meter-track { height: 32px; width: 6px; display: flex; align-items: flex-end; }
+        .size-opt .meter-track.icon-track { width: 24px; }
+        .size-opt .meter-fill { width: 100%; border-radius: 1px; background: var(--text-dim); transition: background 0.15s ease; }
+        .size-opt .meter-label { font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-dim); transition: color 0.15s ease; }
+
+        .size-opt.is-selected { border-color: var(--amber); background: var(--amber-dim); }
+        .size-opt.is-selected .meter-fill { background: var(--amber); }
+        .size-opt.is-selected .meter-label { color: var(--amber); }
+        .size-opt.is-selected .meter-icon { color: var(--amber); }
+
+        .format-opt {
+            padding: 0.65rem;
+            border-radius: 6px;
+            border: 1px solid var(--line);
+            background: transparent;
+            color: var(--text-dim);
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            letter-spacing: 0.04em;
+            cursor: pointer;
+            transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+        }
+        .format-opt:hover { border-color: var(--line-strong); }
+        .format-opt.is-selected { border-color: var(--amber); background: var(--amber-dim); color: var(--amber); }
+
+        .meter-icon { color: var(--text-dim); transition: color 0.15s ease; }
+
+        /* Custom target size input, revealed under the meter row */
+        .custom-size-row input {
+            background: var(--bg-alt);
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            color: var(--text);
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            padding: 0.55rem 0.7rem;
+            width: 100%;
+        }
+        .custom-size-row input::placeholder { color: var(--text-dim); }
+        .custom-size-row input:focus { border-color: var(--amber); outline: none; }
+
+        /* Size / duration warning banner (layout classes applied via Tailwind on the element) */
+        .warn-banner {
+            padding: 0.75rem 0.9rem;
+            border-radius: 8px;
+            font-size: 0.78rem;
+            line-height: 1.4;
+            background: rgba(255, 180, 84, 0.09);
+            border: 1px solid rgba(255, 180, 84, 0.3);
+            color: var(--text);
+        }
+        .warn-banner svg { color: var(--amber); flex-shrink: 0; margin-top: 1px; }
+
+        /* Toggle switch */
+        .toggle-switch {
+            position: relative;
+            width: 38px;
+            height: 22px;
+            border-radius: 999px;
+            background: var(--bg-alt);
+            border: 1px solid var(--line);
+            flex-shrink: 0;
+            cursor: pointer;
+            transition: background 0.15s ease, border-color 0.15s ease;
+        }
+        .toggle-switch .thumb {
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: var(--text-dim);
+            transition: transform 0.15s ease, background 0.15s ease;
+        }
+        .toggle-switch.is-on { background: var(--amber-dim); border-color: rgba(255, 180, 84, 0.4); }
+        .toggle-switch.is-on .thumb { transform: translateX(16px); background: var(--amber); }
+
+        /* Advanced settings disclosure */
+        .adv-toggle {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            width: 100%;
+            padding: 0.6rem 0.1rem;
+            background: transparent;
+            border: none;
+            color: var(--text-dim);
+            cursor: pointer;
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+        }
+        .adv-toggle:hover { color: var(--text); }
+        .adv-toggle svg { width: 14px; height: 14px; transition: transform 0.15s ease; }
+        .adv-toggle.is-open svg { transform: rotate(180deg); }
+
+        .adv-panel {
+            border-top: 1px solid var(--line);
+            padding-top: 0.9rem;
+            gap: 0.75rem;
+        }
+        .adv-field label {
+            display: block;
+            font-family: var(--font-mono);
+            font-size: 0.68rem;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            color: var(--text-dim);
+            margin-bottom: 0.4rem;
+        }
+        .adv-field select {
+            width: 100%;
+            background: var(--bg-alt);
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            color: var(--text);
+            font-family: var(--font-mono);
+            font-size: 0.82rem;
+            padding: 0.5rem 0.5rem;
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%239c948a' stroke-width='2'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 0.5rem center;
+            background-size: 14px;
+            padding-right: 1.75rem;
+        }
+        .adv-field select:focus { border-color: var(--amber); outline: none; }
+
+        /* Progress meter styled like a ladder of bitrate ticks rather than a plain gradient bar */
+        .tick-track {
+            width: 100%;
+            height: 8px;
+            border-radius: 2px;
+            background:
+                repeating-linear-gradient(to right, var(--bg-alt) 0px, var(--bg-alt) 3px, transparent 3px, transparent 4px),
+                var(--bg-alt);
+            border: 1px solid var(--line);
+            overflow: hidden;
+        }
+        .tick-fill {
+            height: 100%;
+            width: 0%;
+            background: repeating-linear-gradient(to right, var(--amber) 0px, var(--amber) 3px, rgba(0,0,0,0.25) 3px, rgba(0,0,0,0.25) 4px);
+            transition: width 0.2s ease;
+        }
+
+        .btn-primary {
+            background: var(--amber);
+            color: #221a0f;
+        }
+        .btn-primary:hover { background: #ffc471; }
+        .btn-secondary {
+            background: var(--cyan);
+            color: #0d2320;
+        }
+        .btn-secondary:hover { background: #8aeee2; }
+
+        /* Visible keyboard focus throughout */
+        button:focus-visible, a:focus-visible, input:focus-visible {
+            outline: 2px solid var(--cyan);
+            outline-offset: 2px;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .status-init .dot { animation: none; }
+            * { transition: none !important; }
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col justify-between selection:bg-amber-400/30 selection:text-white antialiased overflow-x-hidden">
+
+    <div class="scope-field"></div>
+
+    <!-- Header -->
+    <header class="px-6 py-6 max-w-5xl w-full mx-auto flex justify-between items-center">
+        <div class="flex items-center gap-2.5">
+            <div class="flex items-end gap-[3px] h-6" aria-hidden="true">
+                <span class="w-[3px] rounded-sm bg-[var(--amber)]" style="height:40%"></span>
+                <span class="w-[3px] rounded-sm bg-[var(--amber)]" style="height:100%"></span>
+                <span class="w-[3px] rounded-sm bg-[var(--cyan)]" style="height:65%"></span>
+                <span class="w-[3px] rounded-sm bg-[var(--cyan)]" style="height:25%"></span>
+            </div>
+            <span class="text-lg font-semibold tracking-tight">vidcompress</span>
+        </div>
+        <div id="loadingStatus" class="status-badge status-init">
+            <span class="dot"></span>
+            Loading engine
+        </div>
+    </header>
+
+    <!-- Main Workspace -->
+    <main class="max-w-xl w-full mx-auto px-4 py-8 flex-grow flex flex-col justify-center">
+        <div class="panel rounded-2xl p-6 sm:p-8 shadow-2xl relative overflow-hidden">
+
+            <!-- Step 1: Upload (Visible Initially) -->
+            <div id="uploadView" class="space-y-6">
+                <div class="text-center space-y-2">
+                    <h1 class="text-2xl font-semibold tracking-tight">Shrink a video, on this tab only</h1>
+                    <p class="text-sm" style="color:var(--text-dim)">Compression runs locally via FFmpeg.wasm — nothing you drop here leaves your browser.</p>
+                </div>
+
+                <!-- Drop Zone -->
+                <div id="dropZone" class="drop-zone group relative border border-dashed rounded-xl p-8 text-center cursor-pointer transition-colors" style="border-color: var(--line-strong); background: var(--bg-alt);">
+                    <span class="frame-corner tl"></span>
+                    <span class="frame-corner tr"></span>
+                    <span class="frame-corner bl"></span>
+                    <span class="frame-corner br"></span>
+                    <input type="file" id="fileInput" accept="video/*" class="hidden">
+                    <div class="space-y-4 pointer-events-none">
+                        <div class="w-12 h-12 rounded-lg flex items-center justify-center mx-auto transition-colors" style="background: var(--panel); color: var(--text-dim);">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M12 16.5V9.75m0 0l3 3m-3-3l-3 3M6.75 19.5a4.5 4.5 0 01-1.41-8.775 5.25 5.25 0 0110.233-2.33 3 3 0 013.758 3.848A3.752 3.752 0 0118 19.5H6.75z" />
+                            </svg>
+                        </div>
+                        <div class="space-y-1">
+                            <p class="text-sm font-medium">Drop a video here, or <span style="color:var(--amber)">browse</span></p>
+                            <p class="text-xs mono" style="color:var(--text-dim)">MP4 · MOV · MKV · WEBM</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 2: Options & Processing (Hidden Initially) -->
+            <div id="processView" class="hidden space-y-6">
+                <!-- Video Metadata Card -->
+                <div class="flex items-center gap-4 p-4 rounded-lg border" style="background: var(--bg-alt); border-color: var(--line);">
+                    <div class="p-3 rounded-lg" style="background: var(--amber-dim); color: var(--amber);">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25h-9A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z" />
+                        </svg>
+                    </div>
+                    <div class="overflow-hidden flex-grow">
+                        <p id="fileName" class="text-sm font-medium truncate">video.mp4</p>
+                        <p id="fileDetails" class="text-xs mono" style="color:var(--text-dim)">0.0 MB · 0:00</p>
+                    </div>
+                    <button id="resetBtn" class="text-xs mono transition-colors cursor-pointer" style="color:var(--text-dim)">CHANGE</button>
+                </div>
+
+                <!-- Large file / long clip warning -->
+                <div id="sizeWarning" class="warn-banner hidden flex items-start gap-3">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.75" stroke="currentColor" class="w-4 h-4">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m0 3.75h.008v.008H12v-.008ZM21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                    </svg>
+                    <p id="sizeWarningText"></p>
+                </div>
+
+                <!-- Output Format -->
+                <div class="space-y-3">
+                    <label class="text-xs font-semibold uppercase tracking-wider mono" style="color:var(--text-dim)">Output format</label>
+                    <div class="grid grid-cols-2 gap-2">
+                        <button data-format="mp4" id="formatMp4Btn" class="format-opt is-selected">MP4</button>
+                        <button data-format="gif" id="formatGifBtn" class="format-opt">GIF</button>
+                    </div>
+                    <p id="gifNote" class="text-xs hidden" style="color:var(--text-dim)">GIFs are sized by frame rate and resolution (below) rather than a target size — try 10–15 fps and 480p for a smaller file.</p>
+                </div>
+
+                <!-- Size Selector Options -->
+                <div id="sizeControls" class="space-y-3">
+                    <label class="text-xs font-semibold uppercase tracking-wider mono" style="color:var(--text-dim)">Target size</label>
+                    <div class="grid grid-cols-5 gap-2">
+                        <button data-size="8" class="size-opt is-selected">
+                            <span class="meter-track"><span class="meter-fill" style="height:30%"></span></span>
+                            <span class="meter-label">8 MB</span>
+                        </button>
+                        <button data-size="10" class="size-opt">
+                            <span class="meter-track"><span class="meter-fill" style="height:42%"></span></span>
+                            <span class="meter-label">10 MB</span>
+                        </button>
+                        <button data-size="20" class="size-opt">
+                            <span class="meter-track"><span class="meter-fill" style="height:68%"></span></span>
+                            <span class="meter-label">20 MB</span>
+                        </button>
+                        <button data-size="50" class="size-opt">
+                            <span class="meter-track"><span class="meter-fill" style="height:100%"></span></span>
+                            <span class="meter-label">50 MB</span>
+                        </button>
+                        <button data-size="custom" id="customSizeBtn" class="size-opt">
+                            <span class="meter-track icon-track items-center justify-center">
+                                <svg class="meter-icon w-6 h-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.75" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 13.5V3.75m0 9.75a1.5 1.5 0 0 1 0 3m0-3a1.5 1.5 0 0 0 0 3m0 3.75V16.5m12-3V3.75m0 9.75a1.5 1.5 0 0 1 0 3m0-3a1.5 1.5 0 0 0 0 3m0 3.75V16.5m-6-9V3.75m0 3.75a1.5 1.5 0 0 1 0 3m0-3a1.5 1.5 0 0 0 0 3m0 9.75V10.5" />
+                                </svg>
+                            </span>
+                            <span class="meter-label">Custom</span>
+                        </button>
+                    </div>
+                    <div id="customSizeRow" class="custom-size-row hidden flex items-center gap-2">
+                        <input type="text" id="customSizeInput" inputmode="decimal" placeholder="Target size">
+                        <span class="mono text-xs" style="color:var(--text-dim)">MB</span>
+                    </div>
+                    <div id="lowSizeWarning" class="warn-banner hidden flex items-start gap-3">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.75" stroke="currentColor" class="w-4 h-4">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m0 3.75h.008v.008H12v-.008ZM21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                        </svg>
+                        <p>Targets under 4 MB leave very little bitrate to work with — expect visibly lower quality, especially on longer clips.</p>
+                    </div>
+                </div>
+
+                <!-- Privacy Options -->
+                <div class="flex items-center justify-between gap-3 py-1">
+                    <div>
+                        <p class="text-sm font-medium">Remove EXIF metadata</p>
+                        <p class="text-xs" style="color:var(--text-dim)">Strips GPS, device, and timestamp data from the export.</p>
+                    </div>
+                    <button id="metadataToggle" type="button" role="switch" aria-checked="true" aria-label="Remove EXIF metadata" class="toggle-switch is-on">
+                        <span class="thumb"></span>
+                    </button>
+                </div>
+
+                <!-- Advanced Settings -->
+                <div>
+                    <button id="advancedToggleBtn" type="button" class="adv-toggle" aria-expanded="false" aria-controls="advancedPanel">
+                        Advanced settings
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+                        </svg>
+                    </button>
+                    <div id="advancedPanel" class="adv-panel hidden grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div class="adv-field">
+                            <label for="fpsSelect">Frame rate</label>
+                            <select id="fpsSelect">
+                                <option value="original">Original</option>
+                                <option value="15">15 fps</option>
+                                <option value="24">24 fps</option>
+                                <option value="30" selected>30 fps</option>
+                                <option value="60">60 fps</option>
+                            </select>
+                        </div>
+                        <div class="adv-field">
+                            <label for="resolutionSelect">Resolution</label>
+                            <select id="resolutionSelect">
+                                <option value="original">Original</option>
+                                <option value="480">480p</option>
+                                <option value="720" selected>720p</option>
+                                <option value="1080">1080p</option>
+                            </select>
+                        </div>
+                        <div class="adv-field">
+                            <label for="speedSelect">Encode speed</label>
+                            <select id="speedSelect">
+                                <option value="ultrafast">Fastest</option>
+                                <option value="veryfast" selected>Balanced</option>
+                                <option value="medium">Best quality</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Progress Section -->
+                <div id="progressContainer" class="hidden space-y-3 p-4 rounded-lg border" style="background: var(--bg-alt); border-color: var(--line);">
+                    <div class="flex justify-between items-center text-xs mono">
+                        <span id="progressText" style="color: var(--amber);">Compressing…</span>
+                        <span id="progressPercent" class="font-semibold">0%</span>
+                    </div>
+                    <div class="tick-track">
+                        <div id="progressBar" class="tick-fill"></div>
+                    </div>
+                </div>
+
+                <!-- Primary Action Buttons -->
+                <button id="compressBtn" class="btn-primary w-full py-4 rounded-lg font-medium transition-colors transform active:scale-[0.99] flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
+                    Compress video
+                </button>
+
+                <a id="downloadBtn" class="btn-secondary hidden w-full py-4 rounded-lg font-medium text-center transition-colors transform active:scale-[0.99] flex items-center justify-center gap-2 cursor-pointer">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                    </svg>
+                    Download compressed video
+                </a>
+            </div>
+
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="text-center py-6 text-xs mono max-w-xl mx-auto w-full border-t" style="color: var(--text-dim); border-color: rgba(0,0,0,0.3);">
+        Runs locally via FFmpeg.wasm. No data leaves your device.
+    </footer>
+
+    <!-- Application Script -->
+    <script>
+        const { createFFmpeg, fetchFile } = FFmpeg;
+
+        // Point at the sister core files shipped next to index.html
+        const ffmpeg = createFFmpeg({
+            corePath: new URL('ffmpeg-core.js', document.location.href).href,
+            log: true
+        });
+
+        // DOM references
+        const loadingStatus = document.getElementById('loadingStatus');
+        const uploadView = document.getElementById('uploadView');
+        const processView = document.getElementById('processView');
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+        const fileNameText = document.getElementById('fileName');
+        const fileDetailsText = document.getElementById('fileDetails');
+        const resetBtn = document.getElementById('resetBtn');
+        const sizeButtons = document.querySelectorAll('.size-opt');
+        const sizeControls = document.getElementById('sizeControls');
+        const customSizeBtn = document.getElementById('customSizeBtn');
+        const customSizeRow = document.getElementById('customSizeRow');
+        const customSizeInput = document.getElementById('customSizeInput');
+        const sizeWarning = document.getElementById('sizeWarning');
+        const sizeWarningText = document.getElementById('sizeWarningText');
+        const formatButtons = document.querySelectorAll('.format-opt');
+        const gifNote = document.getElementById('gifNote');
+        const lowSizeWarning = document.getElementById('lowSizeWarning');
+        const metadataToggle = document.getElementById('metadataToggle');
+        const advancedToggleBtn = document.getElementById('advancedToggleBtn');
+        const advancedPanel = document.getElementById('advancedPanel');
+        const fpsSelect = document.getElementById('fpsSelect');
+        const resolutionSelect = document.getElementById('resolutionSelect');
+        const speedSelect = document.getElementById('speedSelect');
+        const compressBtn = document.getElementById('compressBtn');
+        const downloadBtn = document.getElementById('downloadBtn');
+        const progressContainer = document.getElementById('progressContainer');
+        const progressBar = document.getElementById('progressBar');
+        const progressPercent = document.getElementById('progressPercent');
+        const progressText = document.getElementById('progressText');
+
+        let selectedFile = null;
+        let selectedTargetSizeMB = 8;
+        let videoDurationSec = 0;
+        let removeMetadata = true;
+        let outputFormat = 'mp4';
+
+        formatButtons.forEach(btn => {
+            btn.addEventListener('click', () => {
+                formatButtons.forEach(b => b.classList.remove('is-selected'));
+                btn.classList.add('is-selected');
+                outputFormat = btn.dataset.format;
+
+                const isGif = outputFormat === 'gif';
+                sizeControls.classList.toggle('opacity-40', isGif);
+                sizeControls.classList.toggle('pointer-events-none', isGif);
+                gifNote.classList.toggle('hidden', !isGif);
+                compressBtn.textContent = isGif ? 'Convert to GIF' : 'Compress video';
+
+                // GIF quality is driven by frame rate / resolution, not target
+                // size — surface those controls automatically.
+                if (isGif && advancedPanel.classList.contains('hidden')) {
+                    advancedPanel.classList.remove('hidden');
+                    advancedToggleBtn.classList.add('is-open');
+                    advancedToggleBtn.setAttribute('aria-expanded', 'true');
+                }
+            });
+        });
+
+        metadataToggle.addEventListener('click', () => {
+            removeMetadata = !removeMetadata;
+            metadataToggle.classList.toggle('is-on', removeMetadata);
+            metadataToggle.setAttribute('aria-checked', String(removeMetadata));
+        });
+
+        advancedToggleBtn.addEventListener('click', () => {
+            const isOpen = advancedPanel.classList.toggle('hidden') === false;
+            advancedToggleBtn.classList.toggle('is-open', isOpen);
+            advancedToggleBtn.setAttribute('aria-expanded', String(isOpen));
+        });
+
+        const LARGE_FILE_BYTES = 500 * 1024 * 1024; // 500 MB
+        const LONG_CLIP_SECONDS = 5 * 60; // 5 minutes
+
+        // Generates a random lowercase alphanumeric string for the download filename
+        function randomSuffix(length) {
+            const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+            let result = '';
+            for (let i = 0; i < length; i++) {
+                result += chars[Math.floor(Math.random() * chars.length)];
+            }
+            return result;
+        }
+
+        // Shows a warning when the chosen target size is under 4 MB
+        function updateLowSizeWarning() {
+            lowSizeWarning.classList.toggle('hidden', !(selectedTargetSizeMB < 4));
+        }
+
+        // Formats the target size for the filename, e.g. 8, 8.5, 12.25 — no trailing zeros
+        function formatSizeForFilename(sizeMB) {
+            return parseFloat(sizeMB.toFixed(2)).toString();
+        }
+
+        // Shows or hides the large-file / long-clip warning. durationSec is
+        // optional — called once immediately with just the file size, then
+        // again once the clip's duration has loaded.
+        function updateSizeWarning(file, durationSec) {
+            const isLarge = file.size > LARGE_FILE_BYTES;
+            const isLong = typeof durationSec === 'number' && durationSec > LONG_CLIP_SECONDS;
+
+            if (!isLarge && !isLong) {
+                sizeWarning.classList.add('hidden');
+                return;
+            }
+
+            if (isLarge && isLong) {
+                sizeWarningText.innerText = 'This file is over 500 MB and longer than 5 minutes. In-browser compression may be slow or run out of memory on this device.';
+            } else if (isLarge) {
+                sizeWarningText.innerText = 'This file is over 500 MB. In-browser compression may be slow or run out of memory on this device.';
+            } else {
+                sizeWarningText.innerText = 'This clip is longer than 5 minutes. In-browser compression may take a while.';
+            }
+            sizeWarning.classList.remove('hidden');
+        }
+
+        // Load the FFmpeg core as soon as the page opens
+        async function initFFmpeg() {
+            try {
+                await ffmpeg.load();
+                loadingStatus.className = 'status-badge status-ready';
+                loadingStatus.innerHTML = '<span class="dot"></span> Engine ready';
+            } catch (error) {
+                console.error(error);
+                loadingStatus.className = 'status-badge status-error';
+                loadingStatus.innerHTML = '<span class="dot"></span> Engine failed to load';
+            }
+        }
+        initFFmpeg();
+
+        // Drag and drop wiring
+        dropZone.addEventListener('click', () => fileInput.click());
+        dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+        dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('drag-over');
+            if (e.dataTransfer.files.length > 0) handleFileSelection(e.dataTransfer.files[0]);
+        });
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) handleFileSelection(e.target.files[0]);
+        });
+
+        function handleFileSelection(file) {
+            if (!file.type.startsWith('video/')) {
+                alert('Please choose a video file.');
+                return;
+            }
+            selectedFile = file;
+            videoDurationSec = 0;
+
+            // Size is known immediately — check it before duration loads,
+            // so the warning (or its absence) reflects the new file right away.
+            updateSizeWarning(file);
+
+            // Read duration via a throwaway <video> element
+            const videoEl = document.createElement('video');
+            videoEl.preload = 'metadata';
+            videoEl.src = URL.createObjectURL(file);
+            videoEl.onloadedmetadata = () => {
+                videoDurationSec = videoEl.duration;
+                fileDetailsText.innerText = `${(file.size / (1024 * 1024)).toFixed(1)} MB · ${Math.floor(videoDurationSec / 60)}:${String(Math.floor(videoDurationSec % 60)).padStart(2, '0')}`;
+                // Recheck now that duration is available, in case the clip
+                // is long even though the file size alone was fine.
+                updateSizeWarning(file, videoDurationSec);
+                URL.revokeObjectURL(videoEl.src);
+            };
+
+            fileNameText.innerText = file.name;
+            uploadView.classList.add('hidden');
+            processView.classList.remove('hidden');
+
+            // Reset view state for a fresh file
+            downloadBtn.classList.add('hidden');
+            compressBtn.classList.remove('hidden');
+            progressContainer.classList.add('hidden');
+            sizeControls.classList.remove('opacity-40', 'pointer-events-none');
+        }
+
+        resetBtn.addEventListener('click', () => {
+            selectedFile = null;
+            videoDurationSec = 0;
+            fileInput.value = '';
+            sizeWarning.classList.add('hidden');
+            processView.classList.add('hidden');
+            uploadView.classList.remove('hidden');
+        });
+
+        // Target size selection — preset buttons set the value directly;
+        // the custom button instead reveals an input for a specific size.
+        sizeButtons.forEach(btn => {
+            btn.addEventListener('click', () => {
+                sizeButtons.forEach(b => b.classList.remove('is-selected'));
+                btn.classList.add('is-selected');
+
+                if (btn.dataset.size === 'custom') {
+                    customSizeRow.classList.remove('hidden');
+                    customSizeInput.focus();
+                    if (customSizeInput.value) {
+                        selectedTargetSizeMB = parseFloat(customSizeInput.value);
+                    }
+                } else {
+                    customSizeRow.classList.add('hidden');
+                    selectedTargetSizeMB = parseFloat(btn.dataset.size);
+                }
+                updateLowSizeWarning();
+            });
+        });
+
+        // Only allow digits and a single decimal separator (dot or comma,
+        // whichever ffmpeg's target-size math can use once normalized to a dot)
+        customSizeInput.addEventListener('input', () => {
+            let raw = customSizeInput.value.replace(',', '.').replace(/[^0-9.]/g, '');
+            const parts = raw.split('.');
+            if (parts.length > 2) raw = parts[0] + '.' + parts.slice(1).join('');
+            customSizeInput.value = raw;
+
+            const value = parseFloat(raw);
+            if (value > 0) {
+                selectedTargetSizeMB = value;
+                updateLowSizeWarning();
+            }
+        });
+
+        // Compression
+        compressBtn.addEventListener('click', async () => {
+            if (!ffmpeg.isLoaded()) {
+                alert('The compression engine is still loading — try again in a moment.');
+                return;
+            }
+            if (!selectedFile || videoDurationSec === 0) return;
+            if (outputFormat === 'mp4' && customSizeBtn.classList.contains('is-selected') && !(parseFloat(customSizeInput.value) > 0)) {
+                alert('Enter a target size in MB first.');
+                customSizeInput.focus();
+                return;
+            }
+
+            compressBtn.disabled = true;
+            sizeControls.classList.add('opacity-40', 'pointer-events-none');
+            progressContainer.classList.remove('hidden');
+            progressBar.style.width = '0%';
+            progressPercent.innerText = '0%';
+
+            const inputName = 'input_' + selectedFile.name;
+            const outputName = outputFormat === 'gif' ? 'compressed_output.gif' : 'compressed_output.mp4';
+            const paletteName = 'palette.png';
+
+            // ffmpeg.setProgress's ratio resets to 0 for each ffmpeg.run() call,
+            // so a phase label (rather than a hardcoded string) keeps multi-pass
+            // GIF encoding from reading as "finished" partway through.
+            let progressPhaseLabel = 'Compressing…';
+            ffmpeg.setProgress(({ ratio }) => {
+                const percentage = Math.min(Math.max(Math.round(ratio * 100), 0), 100);
+                progressBar.style.width = `${percentage}%`;
+                progressPercent.innerText = `${percentage}%`;
+                progressText.innerText = percentage === 100 ? 'Wrapping up…' : progressPhaseLabel;
+            });
+
+            // Advanced settings: frame rate, resolution and encode speed.
+            // Keyframes are held to roughly one every 2 seconds regardless
+            // of the chosen frame rate (MP4 only — GIF has no keyframes).
+            const chosenFps = fpsSelect.value;
+            const chosenResolution = resolutionSelect.value;
+            const chosenPreset = speedSelect.value;
+            const gopSize = (chosenFps === 'original' ? 30 : parseInt(chosenFps)) * 2;
+
+            const vfParts = [];
+            if (chosenResolution !== 'original') {
+                vfParts.push(`scale=-2:${chosenResolution}`);
+            }
+            if (chosenFps !== 'original') {
+                vfParts.push(`fps=${chosenFps}`);
+            }
+
+            ffmpeg.FS('writeFile', inputName, await fetchFile(selectedFile));
+
+            try {
+                if (outputFormat === 'gif') {
+                    // Two-pass palette encode: ffmpeg's GIF output looks far
+                    // better generating a custom color palette first, then
+                    // applying it, rather than encoding directly.
+                    const gifFilterBase = vfParts.length > 0 ? vfParts.join(',') : 'null';
+
+                    progressPhaseLabel = 'Building color palette…';
+                    await ffmpeg.run(
+                        '-i', inputName,
+                        '-vf', `${gifFilterBase === 'null' ? '' : gifFilterBase + ','}palettegen=stats_mode=diff`,
+                        paletteName
+                    );
+
+                    progressPhaseLabel = 'Rendering GIF…';
+                    await ffmpeg.run(
+                        '-i', inputName,
+                        '-i', paletteName,
+                        '-filter_complex', `${gifFilterBase}[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=3`,
+                        '-loop', '0',
+                        outputName
+                    );
+                } else {
+                    // Target bitrate math: convert target size to bits, hold back
+                    // 3% for container overhead, then split between video and audio.
+                    const targetSizeBits = (selectedTargetSizeMB * 1024 * 1024 * 8) * 0.97;
+                    const audioBitrateK = 128; // fixed audio allocation
+                    const totalTargetBitrateK = Math.floor(targetSizeBits / videoDurationSec / 1000);
+                    let videoBitrateK = totalTargetBitrateK - audioBitrateK;
+
+                    // Guard against implausibly low video bitrates on very short/high targets
+                    if (videoBitrateK < 64) {
+                        videoBitrateK = Math.floor(totalTargetBitrateK * 0.85);
+                    }
+
+                    // Single-pass encode: force one video + one audio stream and
+                    // apply the chosen frame rate / resolution / encode speed.
+                    // Metadata (GPS location, device model, timestamps) is
+                    // dropped unless the person has turned that off.
+                    const ffmpegArgs = [
+                        '-i', inputName,
+                        '-threads', '2',
+                        '-map', '0:v:0',
+                        '-map', '0:a:0?',
+                    ];
+                    if (removeMetadata) {
+                        ffmpegArgs.push('-map_metadata', '-1');
+                    }
+                    ffmpegArgs.push(
+                        '-b:v', `${videoBitrateK}k`,
+                        '-c:v', 'libx264',
+                        '-preset', chosenPreset,
+                        '-g', String(gopSize),
+                        '-profile:v', 'high',
+                        '-level', '4.0',
+                        '-pix_fmt', 'yuv420p',
+                    );
+                    if (vfParts.length > 0) {
+                        ffmpegArgs.push('-vf', vfParts.join(','));
+                    }
+                    ffmpegArgs.push(
+                        '-b:a', `${audioBitrateK}k`,
+                        '-c:a', 'aac',
+                        '-movflags', '+faststart',
+                        outputName
+                    );
+                    await ffmpeg.run(...ffmpegArgs);
+                }
+
+                const data = ffmpeg.FS('readFile', outputName);
+                const isGif = outputFormat === 'gif';
+                const compressedBlob = new Blob([data.buffer], { type: isGif ? 'image/gif' : 'video/mp4' });
+                const downloadUrl = URL.createObjectURL(compressedBlob);
+
+                downloadBtn.href = downloadUrl;
+                downloadBtn.download = isGif
+                    ? `vidcompress-${randomSuffix(8)}.gif`
+                    : `${formatSizeForFilename(selectedTargetSizeMB)}mb-compressed-${randomSuffix(8)}.mp4`;
+
+                compressBtn.classList.add('hidden');
+                compressBtn.disabled = false;
+                downloadBtn.classList.remove('hidden');
+                progressText.innerText = 'Done — ready to download';
+            } catch (err) {
+                console.error(err);
+                alert(`Something went wrong during ${outputFormat === 'gif' ? 'GIF conversion' : 'compression'}. Try a different file or setting.`);
+                compressBtn.disabled = false;
+            } finally {
+                // Clean up the virtual filesystem so memory doesn't build up across runs
+                try {
+                    ffmpeg.FS('unlink', inputName);
+                    ffmpeg.FS('unlink', outputName);
+                } catch (e) {}
+                try {
+                    ffmpeg.FS('unlink', paletteName);
+                } catch (e) {}
+            }
+        });
+    </script>
+</body>
+</html>

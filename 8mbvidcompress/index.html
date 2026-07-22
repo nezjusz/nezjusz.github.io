@@ -374,6 +374,16 @@
         const LARGE_FILE_BYTES = 500 * 1024 * 1024; // 500 MB
         const LONG_CLIP_SECONDS = 5 * 60; // 5 minutes
 
+        // Generates a random lowercase alphanumeric string for the download filename
+        function randomSuffix(length) {
+            const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+            let result = '';
+            for (let i = 0; i < length; i++) {
+                result += chars[Math.floor(Math.random() * chars.length)];
+            }
+            return result;
+        }
+
         // Shows or hides the large-file / long-clip warning. durationSec is
         // optional — called once immediately with just the file size, then
         // again once the clip's duration has loaded.
@@ -566,7 +576,7 @@
                 const downloadUrl = URL.createObjectURL(compressedBlob);
 
                 downloadBtn.href = downloadUrl;
-                downloadBtn.download = `compressed_${selectedTargetSizeMB}MB_${selectedFile.name.replace(/\.[^/.]+$/, "")}.mp4`;
+                downloadBtn.download = `8mb-compressed-${randomSuffix(8)}.mp4`;
 
                 compressBtn.classList.add('hidden');
                 compressBtn.disabled = false;

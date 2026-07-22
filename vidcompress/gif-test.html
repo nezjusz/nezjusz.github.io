@@ -196,11 +196,6 @@
         .hidden { display: none !important; }
         .text-center { text-align: center; }
         .status-line { font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-dim); text-align: center; margin-top: 0.25rem; }
-        .debug-info {
-            background: var(--bg-alt); border: 1px solid var(--line); border-radius: 8px;
-            padding: 0.8rem 1rem; font-family: var(--font-mono); font-size: 0.7rem;
-            color: var(--text-dim); white-space: pre-wrap; word-break: break-all; max-height: 220px; overflow-y: auto;
-        }
 
         @media (max-width: 500px) {
             .panel { padding: 1rem; }
@@ -224,8 +219,6 @@
         </div>
         <div id="engineStatus" class="status-badge status-init"><span class="dot"></span> ffmpeg idle</div>
     </div>
-
-    <div id="debugPanel" class="debug-info hidden"></div>
 
     <div class="panel">
         <div class="drop-zone" id="dropZone" tabindex="0">
@@ -277,22 +270,24 @@
 
 <div id="toastContainer" style="position:fixed; top:20px; right:20px; z-index:999; display:flex; flex-direction:column; gap:0.5rem;"></div>
 
-<script src="ffmpeg.min.js"></script>
+<script src="./ffmpeg.min.js"></script>
 <script>
     (function() {
-        const debugPanel = document.getElementById('debugPanel');
-        function logDebug(msg) {
-            console.log('[ffmpeg-gif]', msg);
-            debugPanel.classList.remove('hidden');
-            debugPanel.textContent += msg + '\n';
-            debugPanel.scrollTop = debugPanel.scrollHeight;
-        }
-        logDebug('Environment:');
-        logDebug('  SharedArrayBuffer: ' + (typeof SharedArrayBuffer!=='undefined'?'✅':'❌'));
-        logDebug('  window.FFmpeg: ' + (typeof window.FFmpeg!=='undefined'?'✅':'❌'));
-        logDebug('  window.FFmpegWASM: ' + (typeof window.FFmpegWASM!=='undefined'?'✅':'❌'));
-        logDebug('  window.createFFmpeg: ' + (typeof window.createFFmpeg!=='undefined'?'✅':'❌'));
+        // ─── FFmpeg setup (exactly like the working compressor) ──
+        const { createFFmpeg } = FFmpeg;
+        const ffmpeg = createFFmpeg({
+            corePath: new URL('ffmpeg-core.js', document.location.href).href,
+            log: false,
+            logger: () => {},
+            progress: ({ ratio }) => {
+                if (isConverting && ratio >= 0 && ratio <= 1) {
+                    progressFill.style.width = Math.round(ratio * 100) + '%';
+                    progressLabel.textContent = `processing… ${Math.round(ratio * 100)}%`;
+                }
+            }
+        });
 
+        // DOM refs
         const dropZone = document.getElementById('dropZone');
         const fileInput = document.getElementById('fileInput');
         const fileBadge = document.getElementById('fileBadge');
@@ -319,203 +314,212 @@
         const trimStart = document.getElementById('trimStart');
         const trimDuration = document.getElementById('trimDuration');
 
-        let selectedFile = null, outputBlobUrl = null, ffmpegInstance = null, isConverting = false;
+        let selectedFile = null;
+        let outputBlobUrl = null;
+        let isConverting = false;
 
-        function showToast(msg, type='info') {
+        // ─── Toast & status ──────────────────────────
+        function showToast(msg, type = 'info') {
             const t = document.createElement('div');
             t.className = 'status-badge';
-            if(type==='error') t.classList.add('status-error');
-            else if(type==='success') t.classList.add('status-ready');
+            if (type === 'error') t.classList.add('status-error');
+            else if (type === 'success') t.classList.add('status-ready');
             else t.classList.add('status-init');
-            t.innerHTML = '<span class="dot"></span> '+msg;
+            t.innerHTML = '<span class="dot"></span> ' + msg;
             toastContainer.appendChild(t);
-            setTimeout(()=>t.remove(), 4000);
+            setTimeout(() => t.remove(), 4000);
         }
-        function setEngineStatus(s) {
+
+        function setEngineStatus(status) {
             engineStatus.className = 'status-badge';
-            if(s==='loading') { engineStatus.classList.add('status-init'); engineStatus.innerHTML='<span class="dot"></span> loading ffmpeg'; }
-            else if(s==='ready') { engineStatus.classList.add('status-ready'); engineStatus.innerHTML='<span class="dot"></span> ffmpeg ready'; }
-            else if(s==='error') { engineStatus.classList.add('status-error'); engineStatus.innerHTML='<span class="dot"></span> ffmpeg error'; }
-            else { engineStatus.classList.add('status-init'); engineStatus.innerHTML='<span class="dot"></span> ffmpeg idle'; }
+            if (status === 'loading') {
+                engineStatus.classList.add('status-init');
+                engineStatus.innerHTML = '<span class="dot"></span> loading ffmpeg';
+            } else if (status === 'ready') {
+                engineStatus.classList.add('status-ready');
+                engineStatus.innerHTML = '<span class="dot"></span> ffmpeg ready';
+            } else if (status === 'error') {
+                engineStatus.classList.add('status-error');
+                engineStatus.innerHTML = '<span class="dot"></span> ffmpeg error';
+            } else {
+                engineStatus.classList.add('status-init');
+                engineStatus.innerHTML = '<span class="dot"></span> ffmpeg idle';
+            }
         }
 
-        ditherToggle.addEventListener('click',()=>{ ditherToggle.classList.toggle('is-on'); ditherToggle.setAttribute('aria-checked', ditherToggle.classList.contains('is-on')); });
+        // ─── Toggle & advanced settings ──────────────
+        ditherToggle.addEventListener('click', () => {
+            ditherToggle.classList.toggle('is-on');
+            ditherToggle.setAttribute('aria-checked', ditherToggle.classList.contains('is-on'));
+        });
         let trimEnabled = false;
-        advToggleBtn.addEventListener('click',()=>{ trimEnabled=!trimEnabled; advPanel.classList.toggle('hidden',!trimEnabled); advToggleBtn.classList.toggle('is-open',trimEnabled); });
+        advToggleBtn.addEventListener('click', () => {
+            trimEnabled = !trimEnabled;
+            advPanel.classList.toggle('hidden', !trimEnabled);
+            advToggleBtn.classList.toggle('is-open', trimEnabled);
+        });
 
-        function updateLabels() { fpsVal.textContent=fpsSlider.value+' fps'; widthVal.textContent=widthSlider.value+' px'; colorsVal.textContent=colorsSlider.value; }
-        fpsSlider.addEventListener('input',updateLabels); widthSlider.addEventListener('input',updateLabels); colorsSlider.addEventListener('input',updateLabels);
+        function updateLabels() {
+            fpsVal.textContent = fpsSlider.value + ' fps';
+            widthVal.textContent = widthSlider.value + ' px';
+            colorsVal.textContent = colorsSlider.value;
+        }
+        fpsSlider.addEventListener('input', updateLabels);
+        widthSlider.addEventListener('input', updateLabels);
+        colorsSlider.addEventListener('input', updateLabels);
         updateLabels();
 
-        dropZone.addEventListener('click',e=>{ if(e.target!==fileInput) fileInput.click(); });
-        dropZone.addEventListener('keydown',e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); fileInput.click(); } });
-        fileInput.addEventListener('change',()=>{ if(fileInput.files.length) handleFile(fileInput.files[0]); });
-        dropZone.addEventListener('dragover',e=>{ e.preventDefault(); dropZone.classList.add('drag-over'); });
-        dropZone.addEventListener('dragleave',()=>dropZone.classList.remove('drag-over'));
-        dropZone.addEventListener('drop',e=>{ e.preventDefault(); dropZone.classList.remove('drag-over'); if(e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]); });
+        // ─── File handling ───────────────────────────
+        dropZone.addEventListener('click', (e) => { if (e.target !== fileInput) fileInput.click(); });
+        dropZone.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); } });
+        fileInput.addEventListener('change', () => { if (fileInput.files.length) handleFile(fileInput.files[0]); });
+        dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+        dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('drag-over');
+            if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+        });
 
         function handleFile(file) {
-            if(!file.type.startsWith('video/') && !/\.(mp4|webm|mov|avi|mkv|ogg)$/i.test(file.name)) { showToast('invalid video file','error'); return; }
-            if(file.size>200*1024*1024) { showToast('file too large (max 200 MB)','error'); return; }
-            selectedFile=file; dropZone.classList.add('has-file'); fileBadge.classList.remove('hidden');
-            fileBadge.innerHTML=`📹 ${file.name} <span style="opacity:0.7;">(${(file.size/1024/1024).toFixed(1)} MB)</span>`;
-            convertBtn.disabled=false; resultSection.classList.add('hidden'); progressSection.classList.add('hidden');
-            if(outputBlobUrl){ URL.revokeObjectURL(outputBlobUrl); outputBlobUrl=null; }
-            showToast('video loaded','success');
+            if (!file.type.startsWith('video/') && !/\.(mp4|webm|mov|avi|mkv|ogg)$/i.test(file.name)) {
+                showToast('invalid video file', 'error');
+                return;
+            }
+            if (file.size > 200 * 1024 * 1024) {
+                showToast('file too large (max 200 MB)', 'error');
+                return;
+            }
+            selectedFile = file;
+            dropZone.classList.add('has-file');
+            fileBadge.classList.remove('hidden');
+            fileBadge.innerHTML = `📹 ${file.name} <span style="opacity:0.7;">(${(file.size/1024/1024).toFixed(1)} MB)</span>`;
+            convertBtn.disabled = false;
+            resultSection.classList.add('hidden');
+            progressSection.classList.add('hidden');
+            if (outputBlobUrl) { URL.revokeObjectURL(outputBlobUrl); outputBlobUrl = null; }
+            showToast('video loaded', 'success');
         }
 
-        function detectFactory() {
-            if(typeof window.FFmpeg!=='undefined' && typeof window.FFmpeg.createFFmpeg==='function') return window.FFmpeg.createFFmpeg.bind(window.FFmpeg);
-            if(typeof window.FFmpegWASM!=='undefined' && typeof window.FFmpegWASM.createFFmpeg==='function') return window.FFmpegWASM.createFFmpeg.bind(window.FFmpegWASM);
-            if(typeof window.createFFmpeg==='function') return window.createFFmpeg;
-            if(typeof window.FFmpeg==='function') return window.FFmpeg;
-            return null;
-        }
-
+        // ─── FFmpeg loader (identical pattern to working compressor) ──
         async function loadFFmpeg() {
-            if (ffmpegInstance?.isLoaded) return ffmpegInstance;
+            if (ffmpeg.isLoaded()) return ffmpeg;
+
             setEngineStatus('loading');
-            logDebug('Starting FFmpeg load...');
-            if (typeof SharedArrayBuffer === 'undefined') throw new Error('SharedArrayBuffer not available.');
-
-            const factory = detectFactory();
-            if (!factory) throw new Error('ffmpeg-wasm API not detected.');
-
-            const base = './';
-            // Use the original core JS path – do NOT create a blob URL for it!
-            const coreJsPath = base + 'ffmpeg-core.js';
-            const wasmPath = base + 'ffmpeg-core.wasm';
-            const workerPath = base + 'ffmpeg-core.worker.js';
-
-            let wasmBlobUrl, workerBlobUrl;
-
             try {
-                // 1. Fetch WASM binary, validate, create blob URL
-                const wasmResp = await fetch(wasmPath);
-                if (!wasmResp.ok) throw new Error(`Failed to fetch WASM: ${wasmResp.status}`);
-                const wasmBlob = await wasmResp.blob();
-                const headerBytes = new Uint8Array(await wasmBlob.slice(0, 4).arrayBuffer());
-                const magic = Array.from(headerBytes).map(b => b.toString(16).padStart(2, '0')).join(' ');
-                logDebug(`WASM header bytes: ${magic}`);
-                if (magic !== '00 61 73 6d') {
-                    throw new Error(`Invalid WASM file! First bytes: "${magic}"`);
-                }
-                wasmBlobUrl = URL.createObjectURL(wasmBlob);
-                logDebug(`WASM blob URL ready: ${wasmBlobUrl}`);
-
-                // 2. Optional worker
-                try {
-                    const wResp = await fetch(workerPath);
-                    if (wResp.ok) {
-                        const wBlob = await wResp.blob();
-                        workerBlobUrl = URL.createObjectURL(wBlob);
-                        logDebug(`Worker blob URL ready: ${workerBlobUrl}`);
-                    } else {
-                        logDebug('Worker not found, skipping.');
-                    }
-                } catch (e) {
-                    logDebug('Worker fetch failed (non-critical): ' + e.message);
-                }
-
-                // 3. Create FFmpeg with original corePath + explicit wasmPath
-                ffmpegInstance = factory({
-                    corePath: coreJsPath,          // ← original file, not a blob
-                    wasmPath: wasmBlobUrl,        // ← our verified blob
-                    ...(workerBlobUrl && { workerPath: workerBlobUrl }),
-                    log: false,
-                    logger: () => {},
-                    progress: ({ ratio }) => {
-                        if (isConverting && ratio >= 0 && ratio <= 1) {
-                            progressFill.style.width = Math.round(ratio * 100) + '%';
-                            progressLabel.textContent = `processing… ${Math.round(ratio * 100)}%`;
-                        }
-                    }
-                });
-
-                logDebug('Calling ffmpeg.load()...');
-                await ffmpegInstance.load();
-                ffmpegInstance.isLoaded = true;
-                logDebug('✅ FFmpeg loaded successfully.');
+                await ffmpeg.load();
                 setEngineStatus('ready');
-                return ffmpegInstance;
-
+                return ffmpeg;
             } catch (err) {
-                logDebug('❌ FFmpeg load error: ' + err.message);
-                // Clean up blob URLs on failure
-                [wasmBlobUrl, workerBlobUrl].forEach(u => { if (u) URL.revokeObjectURL(u); });
                 setEngineStatus('error');
                 throw err;
             }
         }
 
-        convertBtn.addEventListener('click', async ()=>{
-            if(!selectedFile||isConverting) return;
-            isConverting=true; convertBtn.disabled=true;
-            convertBtn.innerHTML='<span style="display:inline-block;width:8px;height:8px;background:var(--bg);border-radius:1px;"></span> converting…';
-            progressSection.classList.remove('hidden'); resultSection.classList.add('hidden');
-            progressFill.style.width='0%'; progressLabel.textContent='loading ffmpeg…';
-            if(outputBlobUrl){ URL.revokeObjectURL(outputBlobUrl); outputBlobUrl=null; }
+        // ─── Conversion ──────────────────────────────
+        convertBtn.addEventListener('click', async () => {
+            if (!selectedFile || isConverting) return;
+            isConverting = true;
+            convertBtn.disabled = true;
+            convertBtn.innerHTML = '<span style="display:inline-block;width:8px;height:8px;background:var(--bg);border-radius:1px;"></span> converting…';
+            progressSection.classList.remove('hidden');
+            resultSection.classList.add('hidden');
+            progressFill.style.width = '0%';
+            progressLabel.textContent = 'loading ffmpeg…';
+            if (outputBlobUrl) { URL.revokeObjectURL(outputBlobUrl); outputBlobUrl = null; }
 
-            const inputName='input.'+(selectedFile.name.split('.').pop()||'mp4'), outputName='output.gif';
-            let ffmpeg;
-            try { ffmpeg = await loadFFmpeg(); }
-            catch(err) { showToast('ffmpeg load failed: '+err.message,'error'); resetUI(); return; }
+            const inputName = 'input.' + (selectedFile.name.split('.').pop() || 'mp4');
+            const outputName = 'output.gif';
+            try {
+                await loadFFmpeg();
+            } catch (err) {
+                showToast('ffmpeg load failed: ' + err.message, 'error');
+                resetUI();
+                return;
+            }
 
             try {
                 const fileData = new Uint8Array(await selectedFile.arrayBuffer());
                 ffmpeg.FS('writeFile', inputName, fileData);
-                progressLabel.textContent='converting…'; progressFill.style.width='5%';
+                progressLabel.textContent = 'converting…';
+                progressFill.style.width = '5%';
 
-                const fps=fpsSlider.value, width=widthSlider.value, colors=colorsSlider.value;
+                const fps = fpsSlider.value;
+                const width = widthSlider.value;
+                const colors = colorsSlider.value;
                 const dither = ditherToggle.classList.contains('is-on');
-                const args=[];
-                if(trimEnabled){ const s=trimStart.value||0, d=trimDuration.value||5; if(s>0) args.push('-ss',s.toString()); if(d>0) args.push('-t',d.toString()); }
-                args.push('-i',inputName);
-                const ditherMethod = dither?'bayer:bayer_scale=5':'none';
-                const filter=`fps=${fps},scale=${width}:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=${colors}:stats_mode=diff[p];[s1][p]paletteuse=dither=${ditherMethod}`;
-                args.push('-vf',filter,'-loop','0','-f','gif','-y',outputName);
+                const args = [];
+                if (trimEnabled) {
+                    const start = trimStart.value || 0;
+                    const dur = trimDuration.value || 5;
+                    if (start > 0) args.push('-ss', start.toString());
+                    if (dur > 0) args.push('-t', dur.toString());
+                }
+                args.push('-i', inputName);
+                const ditherMethod = dither ? 'bayer:bayer_scale=5' : 'none';
+                const filter = `fps=${fps},scale=${width}:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=${colors}:stats_mode=diff[p];[s1][p]paletteuse=dither=${ditherMethod}`;
+                args.push('-vf', filter, '-loop', '0', '-f', 'gif', '-y', outputName);
 
-                const startTime=performance.now();
+                const startTime = performance.now();
                 await ffmpeg.run(...args);
-                const elapsed=((performance.now()-startTime)/1000).toFixed(1);
+                const elapsed = ((performance.now() - startTime) / 1000).toFixed(1);
 
                 const outData = ffmpeg.FS('readFile', outputName);
-                const blob = new Blob([outData],{type:'image/gif'});
+                const blob = new Blob([outData], { type: 'image/gif' });
                 outputBlobUrl = URL.createObjectURL(blob);
-                resultGif.src=outputBlobUrl;
-                resultGif.onload=()=>{
-                    const inSize=selectedFile.size, outSize=blob.size;
-                    resultStats.innerHTML = `input ${(inSize/1024/1024).toFixed(1)} MB → output ${(outSize/1024/1024).toFixed(2)} MB · ${elapsed}s ${inSize>0?'· '+((1-outSize/inSize)*100).toFixed(0)+'% smaller':''}`;
+                resultGif.src = outputBlobUrl;
+                resultGif.onload = () => {
+                    const inSize = selectedFile.size;
+                    const outSize = blob.size;
+                    resultStats.innerHTML = `input ${(inSize/1024/1024).toFixed(1)} MB → output ${(outSize/1024/1024).toFixed(2)} MB · ${elapsed}s ${inSize>0 ? '· ' + ((1-outSize/inSize)*100).toFixed(0)+'% smaller' : ''}`;
                 };
-                resultSection.classList.remove('hidden'); progressSection.classList.add('hidden');
-                showToast('gif ready','success');
-                try{ ffmpeg.FS('unlink',inputName); }catch(e){}
-                try{ ffmpeg.FS('unlink',outputName); }catch(e){}
-            } catch(err) {
-                showToast('conversion error: '+err.message,'error');
+                resultSection.classList.remove('hidden');
                 progressSection.classList.add('hidden');
-                try{ ffmpeg.FS('unlink',inputName); }catch(e){}
-                try{ ffmpeg.FS('unlink',outputName); }catch(e){}
-            } finally { resetUI(); }
+                showToast('gif ready', 'success');
+                try { ffmpeg.FS('unlink', inputName); } catch (e) {}
+                try { ffmpeg.FS('unlink', outputName); } catch (e) {}
+            } catch (err) {
+                showToast('conversion error: ' + err.message, 'error');
+                progressSection.classList.add('hidden');
+                try { ffmpeg.FS('unlink', inputName); } catch (e) {}
+                try { ffmpeg.FS('unlink', outputName); } catch (e) {}
+            } finally {
+                resetUI();
+            }
         });
 
-        function resetUI() { isConverting=false; convertBtn.disabled=!selectedFile; convertBtn.innerHTML='⚡ convert to gif'; }
+        function resetUI() {
+            isConverting = false;
+            convertBtn.disabled = !selectedFile;
+            convertBtn.innerHTML = '⚡ convert to gif';
+        }
 
-        downloadBtn.addEventListener('click',()=>{
-            if(!outputBlobUrl) return;
-            const a=document.createElement('a'); a.href=outputBlobUrl;
-            a.download=(selectedFile?.name.replace(/\.[^.]+$/,'')||'video')+'_converted.gif';
-            document.body.appendChild(a); a.click(); a.remove();
-        });
-        newConvertBtn.addEventListener('click',()=>{
-            resultSection.classList.add('hidden'); progressSection.classList.add('hidden');
-            if(outputBlobUrl){ URL.revokeObjectURL(outputBlobUrl); outputBlobUrl=null; }
-            resultGif.src=''; window.scrollTo({top:0,behavior:'smooth'});
+        downloadBtn.addEventListener('click', () => {
+            if (!outputBlobUrl) return;
+            const a = document.createElement('a');
+            a.href = outputBlobUrl;
+            a.download = (selectedFile?.name.replace(/\.[^.]+$/, '') || 'video') + '_converted.gif';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
         });
 
-        if(typeof SharedArrayBuffer==='undefined') showToast('⚠️ SharedArrayBuffer missing – serve via HTTPS/localhost','error');
-        if(detectFactory()) { logDebug('ffmpeg API ready.'); setEngineStatus('ready'); }
-        else logDebug('ffmpeg API NOT detected.');
+        newConvertBtn.addEventListener('click', () => {
+            resultSection.classList.add('hidden');
+            progressSection.classList.add('hidden');
+            if (outputBlobUrl) { URL.revokeObjectURL(outputBlobUrl); outputBlobUrl = null; }
+            resultGif.src = '';
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        });
+
+        // Eagerly load FFmpeg (matching the compressor's initFFmpeg pattern)
+        if (typeof SharedArrayBuffer !== 'undefined') {
+            loadFFmpeg().catch(() => {
+                showToast('⚠️ FFmpeg failed to load. Check console.', 'error');
+            });
+        } else {
+            showToast('⚠️ SharedArrayBuffer missing – serve via HTTPS/localhost', 'error');
+        }
     })();
 </script>
 </body>

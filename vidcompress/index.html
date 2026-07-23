@@ -785,7 +785,7 @@
                 progressText.innerText = 'Done — ready to download';
             } catch (err) {
                 console.error(err);
-                alert('Something went wrong during compression. Try a different file or target size.');
+                alert('Something went wrong during compression. Try a different file or target size, or try using another web browser.');
                 compressBtn.disabled = false;
             } finally {
                 // Clean up the virtual filesystem so memory doesn't build up across runs

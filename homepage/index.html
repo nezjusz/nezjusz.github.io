@@ -3,16 +3,35 @@
 <head>
   <meta charset="UTF-8">
   <meta name="robots" content="noindex">
+  <meta name="theme-color" content="#f8f8f8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>New Tab</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%2314171c'/><circle cx='16' cy='16' r='7' fill='%234dd9c9'/></svg>">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 
+<!-- Dynamic sky (visible only with the Auto background) -->
+<div id="skyDay" class="sky-layer sky-day"></div>
+<div id="skyNight" class="sky-layer sky-night"></div>
+<div id="skyWarm" class="sky-layer sky-warm"></div>
+<div id="skyStars" class="sky-layer sky-stars"></div>
+<div id="skyOrb" class="sky-orb orb-moon" style="left: 10%; top: 62%"></div>
+
 <div class="container">
-  
+
+  <!-- Weather -->
+  <div id="weather" class="weather-card" style="display:none">
+    <svg id="weatherIcon" class="weather-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></svg>
+    <span class="weather-text"><strong id="weatherTemp"></strong><span id="weatherDesc"></span></span>
+  </div>
+
+  <!-- Projects link -->
+  <a class="brand-mark" href="../index.html" title="My projects">Projects</a>
+
   <!-- Settings button -->
   <div class="settings-wrapper">
-    <button id="settingsBtn" class="settings-btn">
+    <button id="settingsBtn" class="settings-btn" type="button" aria-label="Open settings">
       <svg class="settings-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <circle cx="12" cy="12" r="3"></circle>
         <path d="M12 1v6"></path>
@@ -31,36 +50,130 @@
   <div id="settingsModal" class="modal-overlay">
     <div class="modal-content">
       <div class="modal-header">
-        <h2 class="modal-title">Search engine</h2>
-        <button id="closeSettings" class="close-btn">×</button>
+        <h2 class="modal-title">Settings</h2>
+        <button id="closeSettings" class="close-btn" type="button" aria-label="Close settings">×</button>
       </div>
-      <div class="radio-group">
-        <label class="radio-label">
-          <input type="radio" name="searchEngine" value="google" class="radio-input" />
-          <span class="radio-text">Google</span>
-        </label>
-        <label class="radio-label">
-          <input type="radio" name="searchEngine" value="bing" class="radio-input" />
-          <span class="radio-text">Bing</span>
-        </label>
-        <label class="radio-label">
-          <input type="radio" name="searchEngine" value="duckduckgo" class="radio-input" />
-          <span class="radio-text">DuckDuckGo</span>
-        </label>
-        <label class="radio-label">
-          <input type="radio" name="searchEngine" value="ecosia" class="radio-input" />
-          <span class="radio-text">Ecosia</span>
-        </label>
-      </div>
+
+      <section class="modal-section">
+        <h3 class="section-title">Search engine</h3>
+        <div class="radio-group">
+          <label class="radio-label">
+            <input type="radio" name="searchEngine" value="google" class="radio-input" />
+            <span class="radio-text">Google</span>
+          </label>
+          <label class="radio-label">
+            <input type="radio" name="searchEngine" value="bing" class="radio-input" />
+            <span class="radio-text">Bing</span>
+          </label>
+          <label class="radio-label">
+            <input type="radio" name="searchEngine" value="duckduckgo" class="radio-input" />
+            <span class="radio-text">DuckDuckGo</span>
+          </label>
+          <label class="radio-label">
+            <input type="radio" name="searchEngine" value="ecosia" class="radio-input" />
+            <span class="radio-text">Ecosia</span>
+          </label>
+        </div>
+      </section>
+
+      <section class="modal-section">
+        <h3 class="section-title">Theme</h3>
+        <div class="radio-group">
+          <label class="radio-label">
+            <input type="radio" name="theme" value="light" class="radio-input" />
+            <span class="radio-text">Light</span>
+          </label>
+          <label class="radio-label">
+            <input type="radio" name="theme" value="dark" class="radio-input" />
+            <span class="radio-text">Dark</span>
+          </label>
+        </div>
+      </section>
+
+      <section class="modal-section">
+        <h3 class="section-title">Background</h3>
+        <div class="radio-group">
+          <label class="radio-label">
+            <input type="radio" name="background" value="default" class="radio-input" />
+            <span class="radio-text">Default</span>
+          </label>
+          <label class="radio-label">
+            <input type="radio" name="background" value="auto" class="radio-input" />
+            <span class="radio-text">Auto (day cycle)</span>
+          </label>
+          <label class="radio-label">
+            <input type="radio" name="background" value="dusk" class="radio-input" />
+            <span class="radio-text">Dusk</span>
+          </label>
+          <label class="radio-label">
+            <input type="radio" name="background" value="ocean" class="radio-input" />
+            <span class="radio-text">Ocean</span>
+          </label>
+          <label class="radio-label">
+            <input type="radio" name="background" value="sunset" class="radio-input" />
+            <span class="radio-text">Sunset</span>
+          </label>
+        </div>
+      </section>
+
+      <section class="modal-section">
+        <h3 class="section-title">Time format</h3>
+        <div class="radio-group">
+          <label class="radio-label">
+            <input type="radio" name="timeFormat" value="24" class="radio-input" />
+            <span class="radio-text">24-hour (19:30)</span>
+          </label>
+          <label class="radio-label">
+            <input type="radio" name="timeFormat" value="12" class="radio-input" />
+            <span class="radio-text">12-hour (7:30 PM)</span>
+          </label>
+        </div>
+      </section>
+
+      <section class="modal-section">
+        <h3 class="section-title">Weather</h3>
+        <p class="section-hint">Enter your coordinates to show the current weather. Leave both empty to hide it.</p>
+        <div class="add-link-row">
+          <input id="weatherLat" class="add-link-input" type="number" step="any" placeholder="Latitude" />
+          <input id="weatherLon" class="add-link-input" type="number" step="any" placeholder="Longitude" />
+          <button id="weatherApply" class="add-link-btn" type="button">Apply</button>
+        </div>
+        <p id="weatherError" class="add-link-error"></p>
+      </section>
+
+      <section class="modal-section">
+        <h3 class="section-title">Quick links</h3>
+        <ul id="manageLinks" class="manage-links"></ul>
+        <div class="add-link-row">
+          <input id="newLinkName" class="add-link-input" type="text" placeholder="Name" maxlength="40" />
+          <input id="newLinkUrl" class="add-link-input" type="text" placeholder="example.com" />
+          <button id="addLinkBtn" class="add-link-btn" type="button">Add</button>
+        </div>
+        <p id="addLinkError" class="add-link-error"></p>
+      </section>
+
+      <section class="modal-section">
+        <h3 class="section-title">Data</h3>
+        <div class="data-actions">
+          <button id="exportBtn" class="data-btn" type="button">Export</button>
+          <button id="importBtn" class="data-btn" type="button">Import</button>
+          <button id="resetBtn" class="data-btn data-btn-danger" type="button">Reset</button>
+          <input type="file" id="importFile" accept="application/json,.json" hidden />
+        </div>
+        <p id="dataMessage" class="data-message"></p>
+      </section>
     </div>
   </div>
 
   <div class="main-content">
-    
+
     <!-- Greeting and time -->
     <div class="header">
       <p id="greeting" class="greeting">Good morning</p>
       <h1 id="time" class="time">9:30</h1>
+      <div class="day-progress" aria-hidden="true">
+        <div id="dayProgressFill" class="day-progress-fill" style="width: 0%"></div>
+      </div>
     </div>
 
     <!-- Search box -->
@@ -70,38 +183,14 @@
         <path d="m21 21-4.35-4.35"></path>
       </svg>
       <input type="text" id="search" class="search-input" placeholder="Search the web..." autofocus />
+      <button id="clearSearch" class="search-clear" type="button" aria-label="Clear search" hidden>×</button>
+      <kbd class="search-shortcut" title="Press / or Ctrl+K to focus search">/</kbd>
     </div>
 
     <!-- Quick links section -->
     <div class="quick-links">
       <p class="quick-links-title">Quick access</p>
-      <div class="links-grid">
-        <a href="https://github.com" class="link-card">
-          <svg class="link-icon" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
-          </svg>
-          <span class="link-text">GitHub</span>
-        </a>
-        <a href="https://mail.google.com" class="link-card">
-          <svg class="link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <rect x="2" y="4" width="20" height="16" rx="2"></rect>
-            <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"></path>
-          </svg>
-          <span class="link-text">Gmail</span>
-        </a>
-        <a href="https://youtube.com" class="link-card">
-          <svg class="link-icon" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
-          </svg>
-          <span class="link-text">YouTube</span>
-        </a>
-        <a href="https://reddit.com" class="link-card">
-          <svg class="link-icon" viewBox="0 0 24 24" fill="currentColor">
-            <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2"/><path d="M7.5 9.5c.83-1.37 2.45-2.5 4.5-2.5s3.67 1.13 4.5 2.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="9" cy="9" r="1" fill="currentColor"/><circle cx="15" cy="9" r="1" fill="currentColor"/>
-          </svg>
-          <span class="link-text">Reddit</span>
-        </a>
-      </div>
+      <div id="links-grid" class="links-grid"></div>
     </div>
 
     <!-- Footer stats -->
@@ -116,6 +205,124 @@
   </div>
 </div>
 
+<!-- Notes widget -->
+<div id="notes" class="notes">
+  <div class="notes-header">
+    <span>Notes</span>
+    <button id="notesClose" class="notes-close" type="button" aria-label="Hide notes">−</button>
+  </div>
+  <textarea id="notesText" class="notes-text" placeholder="Write a note..."></textarea>
+</div>
+<button id="notesToggle" class="notes-toggle" type="button">Notes</button>
+
+<!-- First-time setup wizard -->
+<div id="setupOverlay" class="setup-overlay">
+  <div class="setup-card">
+    <div class="setup-header">
+      <h2>Welcome</h2>
+      <p>Set this page up the way you like it — takes about a minute.</p>
+      <p id="setupCounter" class="setup-counter">Step 1 of 5</p>
+    </div>
+
+    <section class="setup-step" data-step="1">
+      <h3>Search engine</h3>
+      <div class="radio-group">
+        <label class="radio-label">
+          <input type="radio" name="setupEngine" value="google" class="radio-input" />
+          <span class="radio-text">Google</span>
+        </label>
+        <label class="radio-label">
+          <input type="radio" name="setupEngine" value="bing" class="radio-input" />
+          <span class="radio-text">Bing</span>
+        </label>
+        <label class="radio-label">
+          <input type="radio" name="setupEngine" value="duckduckgo" class="radio-input" />
+          <span class="radio-text">DuckDuckGo</span>
+        </label>
+        <label class="radio-label">
+          <input type="radio" name="setupEngine" value="ecosia" class="radio-input" />
+          <span class="radio-text">Ecosia</span>
+        </label>
+      </div>
+    </section>
+
+    <section class="setup-step" data-step="2">
+      <h3>Appearance</h3>
+      <p class="setup-label">Theme</p>
+      <div class="radio-group">
+        <label class="radio-label">
+          <input type="radio" name="setupTheme" value="light" class="radio-input" />
+          <span class="radio-text">Light</span>
+        </label>
+        <label class="radio-label">
+          <input type="radio" name="setupTheme" value="dark" class="radio-input" />
+          <span class="radio-text">Dark</span>
+        </label>
+      </div>
+      <p class="setup-label">Background</p>
+      <div class="radio-group">
+        <label class="radio-label">
+          <input type="radio" name="setupBackground" value="default" class="radio-input" />
+          <span class="radio-text">Default</span>
+        </label>
+        <label class="radio-label">
+          <input type="radio" name="setupBackground" value="auto" class="radio-input" />
+          <span class="radio-text">Auto (day cycle)</span>
+        </label>
+        <label class="radio-label">
+          <input type="radio" name="setupBackground" value="dusk" class="radio-input" />
+          <span class="radio-text">Dusk</span>
+        </label>
+        <label class="radio-label">
+          <input type="radio" name="setupBackground" value="ocean" class="radio-input" />
+          <span class="radio-text">Ocean</span>
+        </label>
+        <label class="radio-label">
+          <input type="radio" name="setupBackground" value="sunset" class="radio-input" />
+          <span class="radio-text">Sunset</span>
+        </label>
+      </div>
+    </section>
+
+    <section class="setup-step" data-step="3">
+      <h3>Time format</h3>
+      <div class="radio-group">
+        <label class="radio-label">
+          <input type="radio" name="setupTime" value="24" class="radio-input" />
+          <span class="radio-text">24-hour (19:30)</span>
+        </label>
+        <label class="radio-label">
+          <input type="radio" name="setupTime" value="12" class="radio-input" />
+          <span class="radio-text">12-hour (7:30 PM)</span>
+        </label>
+      </div>
+    </section>
+
+    <section class="setup-step" data-step="4">
+      <h3>Weather</h3>
+      <p class="setup-label">Coordinates (optional)</p>
+      <div class="add-link-row">
+        <input id="setupLat" class="add-link-input" type="number" step="any" placeholder="Latitude" />
+        <input id="setupLon" class="add-link-input" type="number" step="any" placeholder="Longitude" />
+      </div>
+      <p class="section-hint">Leave empty to skip — you can set it later from the settings.</p>
+    </section>
+
+    <section class="setup-step" data-step="5">
+      <h3>You're all set</h3>
+      <p class="section-hint">Everything can be changed anytime from the gear icon in the corner.</p>
+    </section>
+
+    <div class="setup-footer">
+      <button id="setupSkip" class="data-btn" type="button">Skip</button>
+      <div class="setup-nav">
+        <button id="setupBack" class="data-btn" type="button" hidden>Back</button>
+        <button id="setupNext" class="data-btn data-btn-primary" type="button">Next</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 const searchEngines = {
   google: 'https://www.google.com/search?q=',
@@ -124,11 +331,117 @@ const searchEngines = {
   ecosia: 'https://www.ecosia.org/search?q='
 };
 
+const DEFAULT_LINKS = [
+  { name: 'GitHub', url: 'https://github.com', svg: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>' },
+  { name: 'Gmail', url: 'https://mail.google.com', svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"></rect><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"></path></svg>' },
+  { name: 'YouTube', url: 'https://youtube.com', svg: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>' },
+  { name: 'Reddit', url: 'https://reddit.com', svg: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0zm5.01 4.744c.688 0 1.25.561 1.25 1.249a1.25 1.25 0 0 1-2.498.056l-2.597-.547-.8 3.747c1.824.07 3.48.632 4.674 1.488.308-.309.73-.491 1.207-.491.968 0 1.754.786 1.754 1.754 0 .716-.435 1.333-1.01 1.614a3.111 3.111 0 0 1 .042.52c0 2.694-3.13 4.87-7.004 4.87-3.874 0-7.004-2.176-7.004-4.87 0-.183.015-.366.043-.534A1.748 1.748 0 0 1 4.028 12c0-.968.786-1.754 1.754-1.754.463 0 .898.196 1.207.49 1.207-.883 2.878-1.43 4.744-1.487l.885-4.182a.342.342 0 0 1 .14-.197.35.35 0 0 1 .238-.042l2.906.617a1.214 1.214 0 0 1 1.108-.701zM9.25 12C8.561 12 8 12.562 8 13.25c0 .687.561 1.248 1.25 1.248.687 0 1.248-.561 1.248-1.249 0-.688-.561-1.249-1.249-1.249zm5.5 0c-.687 0-1.248.561-1.248 1.25 0 .687.561 1.248 1.249 1.248.688 0 1.249-.561 1.249-1.249 0-.687-.562-1.249-1.25-1.249zm-5.466 3.99a.327.327 0 0 0-.231.094.33.33 0 0 0 0 .463c.842.842 2.484.913 2.961.913.477 0 2.105-.056 2.961-.913a.361.361 0 0 0 .029-.463.33.33 0 0 0-.464 0c-.547.533-1.684.73-2.512.73-.828 0-1.979-.196-2.512-.73a.326.326 0 0 0-.232-.095z"/></svg>' },
+  { name: 'Netflix', url: 'https://netflix.com', svg: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="m5.398 0 8.348 23.602c2.346.059 4.856.398 4.856.398L10.113 0H5.398zm8.489 0v9.172l4.715 13.33V0h-4.715zM5.398 1.5V24c1.873-.225 2.81-.312 4.715-.398V14.83L5.398 1.5z"/></svg>' },
+  { name: 'X', url: 'https://x.com', svg: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M14.234 10.162 22.977 0h-2.072l-7.591 8.824L7.251 0H.258l9.168 13.343L.258 24H2.33l8.016-9.318L16.749 24h6.993zm-2.837 3.299-.929-1.329L3.076 1.56h3.182l5.965 8.532.929 1.329 7.754 11.09h-3.182z"/></svg>' }
+];
+
+const WEATHER_CODES = {
+  0: 'Clear', 1: 'Mostly clear', 2: 'Partly cloudy', 3: 'Overcast',
+  45: 'Fog', 48: 'Fog', 51: 'Drizzle', 53: 'Drizzle', 55: 'Drizzle',
+  56: 'Freezing drizzle', 57: 'Freezing drizzle', 61: 'Light rain', 63: 'Rain', 65: 'Heavy rain',
+  66: 'Freezing rain', 67: 'Freezing rain', 71: 'Light snow', 73: 'Snow', 75: 'Heavy snow', 77: 'Snow grains',
+  80: 'Light showers', 81: 'Showers', 82: 'Heavy showers', 85: 'Snow showers', 86: 'Snow showers',
+  95: 'Thunderstorm', 96: 'Thunderstorm', 99: 'Thunderstorm'
+};
+
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+/* ---- Theme ---- */
+function applyTheme(theme) {
+  document.body.classList.toggle('dark', theme === 'dark');
+  document.querySelector('meta[name="theme-color"]').setAttribute('content', theme === 'dark' ? '#14171c' : '#f8f8f8');
+}
+
+const savedTheme = localStorage.getItem('theme');
+let theme = savedTheme || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+applyTheme(theme);
+document.querySelector(`input[name="theme"][value="${theme}"]`).checked = true;
+
+document.querySelectorAll('input[name="theme"]').forEach(radio => {
+  radio.addEventListener('change', (e) => {
+    localStorage.setItem('theme', e.target.value);
+    applyTheme(e.target.value);
+  });
+});
+
+/* ---- Background ---- */
+function applyBackground(bg) {
+  document.body.classList.remove('bg-dusk', 'bg-ocean', 'bg-sunset', 'bg-auto');
+  if (bg !== 'default') document.body.classList.add(`bg-${bg}`);
+  if (bg === 'auto') applySky();
+}
+
+/* ---- Dynamic sky (day/night cycle) ---- */
+function dayFraction(minutes) {
+  const rise = 5 * 60, riseEnd = 8 * 60, set = 17 * 60, setEnd = 20 * 60;
+  if (minutes <= rise || minutes >= setEnd) return 0;
+  if (minutes < riseEnd) return (minutes - rise) / (riseEnd - rise);
+  if (minutes < set) return 1;
+  return 1 - (minutes - set) / (setEnd - set);
+}
+
+function applySky() {
+  const now = new Date();
+  const minutes = now.getHours() * 60 + now.getMinutes();
+  const v = dayFraction(minutes);
+  const warm = 1 - Math.abs(v * 2 - 1);
+
+  document.getElementById('skyDay').style.opacity = v;
+  document.getElementById('skyNight').style.opacity = 1 - v;
+  document.getElementById('skyWarm').style.opacity = warm * 0.9;
+  document.getElementById('skyStars').style.opacity = (1 - v) * 0.9;
+
+  const orb = document.getElementById('skyOrb');
+  const h = Math.sin(((minutes - 300) / 1800) * 2 * Math.PI);
+  orb.classList.toggle('orb-sun', h >= 0);
+  orb.classList.toggle('orb-moon', h < 0);
+  orb.style.left = (10 + (minutes / 1440) * 80) + '%';
+  orb.style.top = (h >= 0 ? 62 - h * 50 : 62 + h * 50) + '%';
+}
+
+const savedBg = localStorage.getItem('background') || 'default';
+applyBackground(savedBg);
+document.querySelector(`input[name="background"][value="${savedBg}"]`).checked = true;
+
+document.querySelectorAll('input[name="background"]').forEach(radio => {
+  radio.addEventListener('change', (e) => {
+    localStorage.setItem('background', e.target.value);
+    applyBackground(e.target.value);
+  });
+});
+
+/* ---- Time ---- */
+let timeFormat = localStorage.getItem('timeFormat') || '24';
+document.querySelector(`input[name="timeFormat"][value="${timeFormat}"]`).checked = true;
+
+document.querySelectorAll('input[name="timeFormat"]').forEach(radio => {
+  radio.addEventListener('change', (e) => {
+    localStorage.setItem('timeFormat', e.target.value);
+    timeFormat = e.target.value;
+    updateTime();
+  });
+});
+
 function updateTime() {
   const now = new Date();
   const hours = now.getHours();
   const minutes = String(now.getMinutes()).padStart(2, '0');
-  document.getElementById('time').textContent = `${hours}:${minutes}`;
+
+  let timeStr;
+  if (timeFormat === '12') {
+    const h12 = hours % 12 || 12;
+    timeStr = `${h12}:${minutes} ${hours >= 12 ? 'PM' : 'AM'}`;
+  } else {
+    timeStr = `${hours}:${minutes}`;
+  }
+  document.getElementById('time').textContent = timeStr;
 
   let greeting = 'Good morning';
   if (hours >= 12 && hours < 17) greeting = 'Good afternoon';
@@ -143,36 +456,173 @@ function updateTime() {
   const pastDaysOfYear = (now - firstDayOfYear) / 86400000;
   const week = Math.ceil((pastDaysOfYear + firstDayOfYear.getDay() + 1) / 7);
   document.getElementById('day-name').textContent = `Week ${week}`;
+
+  const secondsIntoDay = hours * 3600 + now.getMinutes() * 60 + now.getSeconds();
+  document.getElementById('dayProgressFill').style.width = ((secondsIntoDay / 86400) * 100).toFixed(2) + '%';
 }
 
-// Load saved search engine
+/* ---- Search engine ---- */
 const savedEngine = localStorage.getItem('searchEngine') || 'google';
-document.querySelector(`input[value="${savedEngine}"]`).checked = true;
+document.querySelector(`input[name="searchEngine"][value="${savedEngine}"]`).checked = true;
 
-// Settings modal
-document.getElementById('settingsBtn').addEventListener('click', () => {
-  document.getElementById('settingsModal').style.display = 'flex';
-});
-
-document.getElementById('closeSettings').addEventListener('click', () => {
-  document.getElementById('settingsModal').style.display = 'none';
-});
-
-document.getElementById('settingsModal').addEventListener('click', (e) => {
-  if (e.target === document.getElementById('settingsModal')) {
-    document.getElementById('settingsModal').style.display = 'none';
-  }
-});
-
-// Save search engine selection
 document.querySelectorAll('input[name="searchEngine"]').forEach(radio => {
   radio.addEventListener('change', (e) => {
     localStorage.setItem('searchEngine', e.target.value);
   });
 });
 
-// Search functionality
-document.getElementById('search').addEventListener('keydown', function(e) {
+/* ---- Settings modal ---- */
+function openModal() {
+  renderManageList();
+  document.getElementById('weatherLat').value = localStorage.getItem('weatherLat') || '';
+  document.getElementById('weatherLon').value = localStorage.getItem('weatherLon') || '';
+  document.getElementById('weatherError').textContent = '';
+  document.getElementById('settingsModal').style.display = 'flex';
+}
+
+function closeModal() {
+  document.getElementById('settingsModal').style.display = 'none';
+}
+
+document.getElementById('settingsBtn').addEventListener('click', openModal);
+document.getElementById('closeSettings').addEventListener('click', closeModal);
+
+document.getElementById('settingsModal').addEventListener('click', (e) => {
+  if (e.target === document.getElementById('settingsModal')) closeModal();
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeModal();
+});
+
+/* ---- Weather coords ---- */
+document.getElementById('weatherApply').addEventListener('click', () => {
+  const err = document.getElementById('weatherError');
+  const latRaw = document.getElementById('weatherLat').value.trim();
+  const lonRaw = document.getElementById('weatherLon').value.trim();
+
+  if (!latRaw && !lonRaw) {
+    localStorage.removeItem('weatherLat');
+    localStorage.removeItem('weatherLon');
+    err.textContent = 'Weather hidden.';
+    err.style.color = 'var(--accent-strong)';
+    loadWeather();
+    return;
+  }
+
+  const lat = parseFloat(latRaw);
+  const lon = parseFloat(lonRaw);
+  const latOk = !isNaN(lat) && lat >= -90 && lat <= 90;
+  const lonOk = !isNaN(lon) && lon >= -180 && lon <= 180;
+  if (!latOk || !lonOk) {
+    err.textContent = 'Invalid coordinates — latitude is -90..90, longitude is -180..180.';
+    err.style.color = '';
+    return;
+  }
+
+  localStorage.setItem('weatherLat', String(lat));
+  localStorage.setItem('weatherLon', String(lon));
+  err.textContent = 'Weather updated.';
+  err.style.color = 'var(--accent-strong)';
+  loadWeather();
+});
+
+/* ---- Quick links ---- */
+function getLinks() {
+  const stored = localStorage.getItem('quickLinks');
+  if (stored) {
+    try {
+      const parsed = JSON.parse(stored);
+      if (Array.isArray(parsed)) return parsed;
+    } catch (e) {}
+  }
+  return DEFAULT_LINKS.map(l => ({ name: l.name, url: l.url }));
+}
+
+function saveLinks(links) {
+  localStorage.setItem('quickLinks', JSON.stringify(links));
+}
+
+function renderLinks() {
+  const grid = document.getElementById('links-grid');
+  grid.innerHTML = '';
+  getLinks().forEach(link => {
+    const a = document.createElement('a');
+    a.href = link.url;
+    a.className = 'link-card';
+
+    const def = DEFAULT_LINKS.find(d => d.url === link.url);
+    let iconHtml;
+    if (def) {
+      iconHtml = def.svg.replace('<svg', '<svg class="link-icon"');
+    } else {
+      try {
+        const domain = new URL(link.url).hostname;
+        iconHtml = `<img class="link-icon" src="https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64" alt="">`;
+      } catch (e) {
+        iconHtml = `<span class="link-icon letter-icon">${escapeHtml(link.name.charAt(0).toUpperCase() || '?')}</span>`;
+      }
+    }
+
+    a.innerHTML = iconHtml + `<span class="link-text">${escapeHtml(link.name)}</span>`;
+    grid.appendChild(a);
+  });
+}
+
+function renderManageList() {
+  const ul = document.getElementById('manageLinks');
+  ul.innerHTML = '';
+  getLinks().forEach((link, i) => {
+    const li = document.createElement('li');
+    li.innerHTML = `<span class="manage-name">${escapeHtml(link.name)}</span>` +
+      `<button type="button" class="remove-link-btn" data-index="${i}" aria-label="Remove ${escapeHtml(link.name)}">×</button>`;
+    ul.appendChild(li);
+  });
+}
+
+document.getElementById('manageLinks').addEventListener('click', (e) => {
+  const btn = e.target.closest('.remove-link-btn');
+  if (!btn) return;
+  const links = getLinks();
+  links.splice(Number(btn.dataset.index), 1);
+  saveLinks(links);
+  renderLinks();
+});
+
+document.getElementById('addLinkBtn').addEventListener('click', () => {
+  const name = document.getElementById('newLinkName').value.trim();
+  let url = document.getElementById('newLinkUrl').value.trim();
+  const errEl = document.getElementById('addLinkError');
+  if (!name || !url) return;
+  if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+  try {
+    new URL(url);
+  } catch (e) {
+    errEl.textContent = 'That URL doesn\'t look valid.';
+    return;
+  }
+  const links = getLinks();
+  if (links.some(l => l.url.toLowerCase() === url.toLowerCase())) {
+    errEl.textContent = `"${name}" is already in your links.`;
+    return;
+  }
+  errEl.textContent = '';
+  links.push({ name, url });
+  saveLinks(links);
+  document.getElementById('newLinkName').value = '';
+  document.getElementById('newLinkUrl').value = '';
+  renderLinks();
+});
+
+document.getElementById('newLinkUrl').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') document.getElementById('addLinkBtn').click();
+});
+
+/* ---- Search functionality ---- */
+const searchInput = document.getElementById('search');
+const clearSearchBtn = document.getElementById('clearSearch');
+
+searchInput.addEventListener('keydown', function(e) {
   if (e.key === 'Enter') {
     const query = this.value;
     if (query) {
@@ -183,8 +633,274 @@ document.getElementById('search').addEventListener('keydown', function(e) {
   }
 });
 
+searchInput.addEventListener('input', () => {
+  clearSearchBtn.hidden = !searchInput.value;
+});
+
+clearSearchBtn.addEventListener('click', () => {
+  searchInput.value = '';
+  clearSearchBtn.hidden = true;
+  searchInput.focus();
+});
+
+/* ---- Keyboard shortcut to focus search ---- */
+document.addEventListener('keydown', function(e) {
+  const isTyping = e.target === document.getElementById('search') || e.target.tagName === 'INPUT';
+  if (e.key === '/' && !isTyping) {
+    e.preventDefault();
+    document.getElementById('search').focus();
+  }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+    e.preventDefault();
+    document.getElementById('search').focus();
+  }
+});
+
+/* ---- Notes ---- */
+function setNotesVisible(visible) {
+  document.getElementById('notes').style.display = visible ? 'block' : 'none';
+  document.getElementById('notesToggle').style.display = visible ? 'none' : 'flex';
+}
+
+setNotesVisible(localStorage.getItem('notesHidden') !== '1');
+
+document.getElementById('notesClose').addEventListener('click', () => {
+  localStorage.setItem('notesHidden', '1');
+  setNotesVisible(false);
+});
+
+document.getElementById('notesToggle').addEventListener('click', () => {
+  localStorage.removeItem('notesHidden');
+  setNotesVisible(true);
+});
+
+const notesText = document.getElementById('notesText');
+notesText.value = localStorage.getItem('notes') || '';
+notesText.addEventListener('input', () => {
+  localStorage.setItem('notes', notesText.value);
+});
+
+/* ---- Data: export / import / reset ---- */
+let dataMsgTimer;
+function showDataMessage(msg, isError) {
+  const el = document.getElementById('dataMessage');
+  el.textContent = msg;
+  el.style.color = isError ? 'var(--danger)' : '';
+  clearTimeout(dataMsgTimer);
+  dataMsgTimer = setTimeout(() => { el.textContent = ''; }, 2500);
+}
+
+function applyImportedSettings() {
+  theme = localStorage.getItem('theme') || theme;
+  applyTheme(theme);
+  document.querySelector(`input[name="theme"][value="${theme}"]`).checked = true;
+
+  const bg = localStorage.getItem('background') || 'default';
+  applyBackground(bg);
+  document.querySelector(`input[name="background"][value="${bg}"]`).checked = true;
+
+  timeFormat = localStorage.getItem('timeFormat') || '24';
+  document.querySelector(`input[name="timeFormat"][value="${timeFormat}"]`).checked = true;
+
+  const engine = localStorage.getItem('searchEngine') || 'google';
+  document.querySelector(`input[name="searchEngine"][value="${engine}"]`).checked = true;
+
+  renderLinks();
+  updateTime();
+}
+
+document.getElementById('exportBtn').addEventListener('click', () => {
+  const data = {
+    searchEngine: localStorage.getItem('searchEngine') || 'google',
+    theme: localStorage.getItem('theme') || theme,
+    timeFormat: localStorage.getItem('timeFormat') || '24',
+    background: localStorage.getItem('background') || 'default',
+    quickLinks: getLinks(),
+    notes: localStorage.getItem('notes') || ''
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'newtab-settings.json';
+  a.click();
+  URL.revokeObjectURL(url);
+  showDataMessage('Settings exported.');
+});
+
+document.getElementById('importBtn').addEventListener('click', () => {
+  document.getElementById('importFile').click();
+});
+
+document.getElementById('importFile').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const data = JSON.parse(reader.result);
+      if (typeof data.searchEngine === 'string') localStorage.setItem('searchEngine', data.searchEngine);
+      if (data.theme === 'light' || data.theme === 'dark') localStorage.setItem('theme', data.theme);
+      if (data.timeFormat === '12' || data.timeFormat === '24') localStorage.setItem('timeFormat', data.timeFormat);
+      if (['default', 'auto', 'dusk', 'ocean', 'sunset'].includes(data.background)) localStorage.setItem('background', data.background);
+      if (Array.isArray(data.quickLinks)) localStorage.setItem('quickLinks', JSON.stringify(data.quickLinks));
+      if (typeof data.notes === 'string') {
+        localStorage.setItem('notes', data.notes);
+        document.getElementById('notesText').value = data.notes;
+      }
+      applyImportedSettings();
+      showDataMessage('Settings imported.');
+    } catch (err) {
+      showDataMessage('Invalid file — nothing was changed.', true);
+    }
+    e.target.value = '';
+  };
+  reader.readAsText(file);
+});
+
+document.getElementById('resetBtn').addEventListener('click', () => {
+  if (!confirm('Reset everything to defaults? This clears settings, links, weather coordinates, notes, and will show the setup wizard again.')) return;
+  ['searchEngine', 'theme', 'timeFormat', 'quickLinks', 'background', 'weatherLat', 'weatherLon', 'notes', 'notesHidden', 'setupDone'].forEach(k => localStorage.removeItem(k));
+  location.reload();
+});
+
+/* ---- Weather ---- */
+const WEATHER_ICONS = {
+  clear: '<circle cx="12" cy="12" r="4.5"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/>',
+  partly: '<circle cx="9" cy="9" r="3.5"/><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/>',
+  cloudy: '<path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/>',
+  fog: '<path d="M4 14.9A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.24"/><path d="M16 17H7"/><path d="M17 21H9"/>',
+  rain: '<path d="M4 14.9A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.24"/><path d="M8 19v2"/><path d="M12 19v2"/><path d="M16 19v2"/>',
+  snow: '<path d="M4 14.9A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.24"/><path d="M8 19.5v2M7 20.5h2M12 19.5v2M11 20.5h2M16 19.5v2M15 20.5h2"/>',
+  storm: '<path d="M4 14.9A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.24"/><path d="m13 15-2.5 4h4l-2.5 4"/>'
+};
+
+function weatherCategory(code) {
+  if (code === 0) return 'clear';
+  if (code === 1 || code === 2) return 'partly';
+  if (code === 3) return 'cloudy';
+  if (code >= 45 && code <= 48) return 'fog';
+  if (code >= 51 && code <= 67) return 'rain';
+  if (code >= 71 && code <= 77) return 'snow';
+  if (code >= 80 && code <= 82) return 'rain';
+  if (code >= 85 && code <= 86) return 'snow';
+  return 'storm';
+}
+
+function loadWeather() {
+  const el = document.getElementById('weather');
+  const lat = parseFloat(localStorage.getItem('weatherLat'));
+  const lon = parseFloat(localStorage.getItem('weatherLon'));
+  if (isNaN(lat) || isNaN(lon)) {
+    el.style.display = 'none';
+    return;
+  }
+  fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,weather_code`)
+    .then(r => r.json())
+    .then(data => {
+      if (!data.current) throw new Error('empty response');
+      const temp = Math.round(data.current.temperature_2m);
+      const code = data.current.weather_code;
+      const desc = WEATHER_CODES[code] || '';
+      document.getElementById('weatherIcon').innerHTML = WEATHER_ICONS[weatherCategory(code)];
+      document.getElementById('weatherTemp').textContent = `${temp}°C`;
+      document.getElementById('weatherDesc').textContent = desc ? ` · ${desc}` : '';
+      el.style.display = '';
+    })
+    .catch(() => { el.style.display = 'none'; });
+}
+
+/* ---- First-time setup wizard ---- */
+const SETUP_STEPS = 5;
+let setupStep = 1;
+
+function showSetupStep(n) {
+  setupStep = n;
+  document.querySelectorAll('.setup-step').forEach(s => { s.style.display = 'none'; });
+  document.querySelector(`.setup-step[data-step="${n}"]`).style.display = 'block';
+  document.getElementById('setupBack').hidden = n === 1;
+  document.getElementById('setupNext').textContent = n === SETUP_STEPS ? 'Finish' : 'Next';
+  document.getElementById('setupCounter').textContent = `Step ${n} of ${SETUP_STEPS}`;
+}
+
+function prefillSetup() {
+  const set = (key, def, prefix) => {
+    const v = localStorage.getItem(key) || def;
+    const el = document.querySelector(`input[name="${prefix}"][value="${v}"]`);
+    if (el) el.checked = true;
+  };
+  set('searchEngine', 'google', 'setupEngine');
+  set('theme', 'light', 'setupTheme');
+  set('background', 'default', 'setupBackground');
+  set('timeFormat', '24', 'setupTime');
+  const lat = localStorage.getItem('weatherLat');
+  const lon = localStorage.getItem('weatherLon');
+  if (lat) document.getElementById('setupLat').value = lat;
+  if (lon) document.getElementById('setupLon').value = lon;
+}
+
+function finishSetup() {
+  const engine = document.querySelector('input[name="setupEngine"]:checked').value;
+  localStorage.setItem('searchEngine', engine);
+  document.querySelector(`input[name="searchEngine"][value="${engine}"]`).checked = true;
+
+  const themeV = document.querySelector('input[name="setupTheme"]:checked').value;
+  localStorage.setItem('theme', themeV);
+  theme = themeV;
+  applyTheme(themeV);
+  document.querySelector(`input[name="theme"][value="${themeV}"]`).checked = true;
+
+  const bg = document.querySelector('input[name="setupBackground"]:checked').value;
+  localStorage.setItem('background', bg);
+  applyBackground(bg);
+  document.querySelector(`input[name="background"][value="${bg}"]`).checked = true;
+
+  const tf = document.querySelector('input[name="setupTime"]:checked').value;
+  localStorage.setItem('timeFormat', tf);
+  timeFormat = tf;
+  document.querySelector(`input[name="timeFormat"][value="${tf}"]`).checked = true;
+
+  const lat = parseFloat(document.getElementById('setupLat').value);
+  const lon = parseFloat(document.getElementById('setupLon').value);
+  if (!isNaN(lat) && lat >= -90 && lat <= 90) localStorage.setItem('weatherLat', String(lat));
+  else localStorage.removeItem('weatherLat');
+  if (!isNaN(lon) && lon >= -180 && lon <= 180) localStorage.setItem('weatherLon', String(lon));
+  else localStorage.removeItem('weatherLon');
+
+  localStorage.setItem('setupDone', '1');
+  document.getElementById('setupOverlay').style.display = 'none';
+  renderLinks();
+  updateTime();
+  loadWeather();
+}
+
+function skipSetup() {
+  localStorage.setItem('setupDone', '1');
+  document.getElementById('setupOverlay').style.display = 'none';
+  loadWeather();
+}
+
+document.getElementById('setupNext').addEventListener('click', () => {
+  if (setupStep < SETUP_STEPS) showSetupStep(setupStep + 1);
+  else finishSetup();
+});
+
+document.getElementById('setupBack').addEventListener('click', () => showSetupStep(setupStep - 1));
+document.getElementById('setupSkip').addEventListener('click', skipSetup);
+
+/* ---- Init ---- */
+if (!localStorage.getItem('setupDone')) {
+  prefillSetup();
+  showSetupStep(1);
+  document.getElementById('setupOverlay').style.display = 'flex';
+}
+
+renderLinks();
+loadWeather();
 updateTime();
 setInterval(updateTime, 1000);
+applySky();
+setInterval(applySky, 15000);
 </script>
 
 </body>

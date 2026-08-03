@@ -14,5 +14,9 @@
     {
         "name": "Video Compression Tool",
         "url": "./vidcompress/"
+    },
+    {
+        "name": "Epic Key Seller",
+        "url": "./epickeysimulator/"
     }
 ]

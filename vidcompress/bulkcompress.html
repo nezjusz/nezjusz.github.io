@@ -267,6 +267,24 @@
             .status-init .dot { animation: none; }
             * { transition: none !important; }
         }
+
+        /* Queue list (bulk upload) */
+        .queue-item {
+            transition: border-color 0.15s ease, background 0.15s ease;
+        }
+        .queue-item.is-done { border-color: rgba(111, 230, 216, 0.35); }
+        .queue-item.is-error { border-color: rgba(255, 107, 107, 0.35); }
+        .queue-item-download {
+            background: var(--cyan);
+            color: #0d2320;
+            font-family: var(--font-mono);
+            font-size: 0.72rem;
+            padding: 0.5rem 0.85rem;
+            border-radius: 6px;
+            white-space: nowrap;
+            transition: background 0.15s ease;
+        }
+        .queue-item-download:hover { background: #8aeee2; }
     </style>
 </head>
 <body class="min-h-screen flex flex-col justify-between selection:bg-amber-400/30 selection:text-white antialiased overflow-x-hidden">
@@ -297,7 +315,7 @@
             <!-- Step 1: Upload (Visible Initially) -->
             <div id="uploadView" class="space-y-6">
                 <div class="text-center space-y-2">
-                    <h1 class="text-2xl font-semibold tracking-tight">Shrink a video, on this tab only</h1>
+                    <h1 class="text-2xl font-semibold tracking-tight">Shrink your videos, on this tab only</h1>
                     <p class="text-sm" style="color:var(--text-dim)">Compression runs locally via FFmpeg.wasm — nothing you drop here leaves your browser.</p>
                 </div>
 
@@ -307,7 +325,7 @@
                     <span class="frame-corner tr"></span>
                     <span class="frame-corner bl"></span>
                     <span class="frame-corner br"></span>
-                    <input type="file" id="fileInput" accept="video/*" class="hidden">
+                    <input type="file" id="fileInput" accept="video/*" multiple class="hidden">
                     <div class="space-y-4 pointer-events-none">
                         <div class="w-12 h-12 rounded-lg flex items-center justify-center mx-auto transition-colors" style="background: var(--panel); color: var(--text-dim);">
                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6">
@@ -315,7 +333,7 @@
                             </svg>
                         </div>
                         <div class="space-y-1">
-                            <p class="text-sm font-medium">Drop a video here, or <span style="color:var(--amber)">browse</span></p>
+                            <p class="text-sm font-medium">Drop up to 10 videos here, or <span style="color:var(--amber)">browse</span></p>
                             <p class="text-xs mono" style="color:var(--text-dim)">MP4 · MOV · MKV · WEBM</p>
                         </div>
                     </div>
@@ -324,18 +342,13 @@
 
             <!-- Step 2: Options & Processing (Hidden Initially) -->
             <div id="processView" class="hidden space-y-6">
-                <!-- Video Metadata Card -->
-                <div class="flex items-center gap-4 p-4 rounded-lg border" style="background: var(--bg-alt); border-color: var(--line);">
-                    <div class="p-3 rounded-lg" style="background: var(--amber-dim); color: var(--amber);">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25h-9A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z" />
-                        </svg>
+                <!-- Queue -->
+                <div class="space-y-2">
+                    <div class="flex items-center justify-between">
+                        <label class="text-xs font-semibold uppercase tracking-wider mono" style="color:var(--text-dim)">Queue (<span id="queueCount">0</span>/10)</label>
+                        <button id="resetBtn" class="text-xs mono transition-colors cursor-pointer" style="color:var(--text-dim)">CLEAR</button>
                     </div>
-                    <div class="overflow-hidden flex-grow">
-                        <p id="fileName" class="text-sm font-medium truncate">video.mp4</p>
-                        <p id="fileDetails" class="text-xs mono" style="color:var(--text-dim)">0.0 MB · 0:00</p>
-                    </div>
-                    <button id="resetBtn" class="text-xs mono transition-colors cursor-pointer" style="color:var(--text-dim)">CHANGE</button>
+                    <div id="queueList" class="space-y-2"></div>
                 </div>
 
                 <!-- Large file / long clip warning -->
@@ -348,7 +361,7 @@
 
                 <!-- Size Selector Options -->
                 <div id="sizeControls" class="space-y-3">
-                    <label class="text-xs font-semibold uppercase tracking-wider mono" style="color:var(--text-dim)">Target size</label>
+                    <label class="text-xs font-semibold uppercase tracking-wider mono" style="color:var(--text-dim)">Target size <span class="normal-case" style="color:var(--text-dim); opacity:0.75;">(applies to every file)</span></label>
                     <div class="grid grid-cols-5 gap-2">
                         <button data-size="8" class="size-opt is-selected">
                             <span class="meter-track"><span class="meter-fill" style="height:30%"></span></span>
@@ -391,7 +404,7 @@
                 <div class="flex items-center justify-between gap-3 py-1">
                     <div>
                         <p class="text-sm font-medium">Remove EXIF metadata</p>
-                        <p class="text-xs" style="color:var(--text-dim)">Strips GPS, device, and timestamp data from the export.</p>
+                        <p class="text-xs" style="color:var(--text-dim)">Strips GPS, device, and timestamp data from every export.</p>
                     </div>
                     <button id="metadataToggle" type="button" role="switch" aria-checked="true" aria-label="Remove EXIF metadata" class="toggle-switch is-on">
                         <span class="thumb"></span>
@@ -448,17 +461,10 @@
                     </div>
                 </div>
 
-                <!-- Primary Action Buttons -->
-                <button id="compressBtn" class="btn-primary w-full py-4 rounded-lg font-medium transition-colors transform active:scale-[0.99] flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
+                <!-- Primary Action Button -->
+                <button id="compressBtn" class="btn-primary w-full py-4 rounded-lg font-medium transition-colors transform active:scale-[0.99] flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed" disabled>
                     Compress video
                 </button>
-
-                <a id="downloadBtn" class="btn-secondary hidden w-full py-4 rounded-lg font-medium text-center transition-colors transform active:scale-[0.99] flex items-center justify-center gap-2 cursor-pointer">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
-                    </svg>
-                    Download compressed video
-                </a>
             </div>
 
         </div>
@@ -479,15 +485,19 @@
             log: true
         });
 
+        const MAX_QUEUE_SIZE = 10;
+        const LARGE_FILE_BYTES = 500 * 1024 * 1024; // 500 MB
+        const LONG_CLIP_SECONDS = 5 * 60; // 5 minutes
+
         // DOM references
         const loadingStatus = document.getElementById('loadingStatus');
         const uploadView = document.getElementById('uploadView');
         const processView = document.getElementById('processView');
         const dropZone = document.getElementById('dropZone');
         const fileInput = document.getElementById('fileInput');
-        const fileNameText = document.getElementById('fileName');
-        const fileDetailsText = document.getElementById('fileDetails');
         const resetBtn = document.getElementById('resetBtn');
+        const queueList = document.getElementById('queueList');
+        const queueCountEl = document.getElementById('queueCount');
         const sizeButtons = document.querySelectorAll('.size-opt');
         const sizeControls = document.getElementById('sizeControls');
         const customSizeBtn = document.getElementById('customSizeBtn');
@@ -503,16 +513,18 @@
         const resolutionSelect = document.getElementById('resolutionSelect');
         const speedSelect = document.getElementById('speedSelect');
         const compressBtn = document.getElementById('compressBtn');
-        const downloadBtn = document.getElementById('downloadBtn');
         const progressContainer = document.getElementById('progressContainer');
         const progressBar = document.getElementById('progressBar');
         const progressPercent = document.getElementById('progressPercent');
         const progressText = document.getElementById('progressText');
 
-        let selectedFile = null;
         let selectedTargetSizeMB = 8;
-        let videoDurationSec = 0;
         let removeMetadata = true;
+        let queue = [];
+        let nextItemId = 1;
+        let isProcessingBatch = false;
+
+        // ---------- Privacy / advanced settings ----------
 
         metadataToggle.addEventListener('click', () => {
             removeMetadata = !removeMetadata;
@@ -526,8 +538,7 @@
             advancedToggleBtn.setAttribute('aria-expanded', String(isOpen));
         });
 
-        const LARGE_FILE_BYTES = 500 * 1024 * 1024; // 500 MB
-        const LONG_CLIP_SECONDS = 5 * 60; // 5 minutes
+        // ---------- Small helpers ----------
 
         // Generates a random lowercase alphanumeric string for the download filename
         function randomSuffix(length) {
@@ -539,37 +550,193 @@
             return result;
         }
 
-        // Shows a warning when the chosen target size is under 4 MB
-        function updateLowSizeWarning() {
-            lowSizeWarning.classList.toggle('hidden', !(selectedTargetSizeMB < 4));
-        }
-
         // Formats the target size for the filename, e.g. 8, 8.5, 12.25 — no trailing zeros
         function formatSizeForFilename(sizeMB) {
             return parseFloat(sizeMB.toFixed(2)).toString();
         }
 
-        // Shows or hides the large-file / long-clip warning. durationSec is
-        // optional — called once immediately with just the file size, then
-        // again once the clip's duration has loaded.
-        function updateSizeWarning(file, durationSec) {
-            const isLarge = file.size > LARGE_FILE_BYTES;
-            const isLong = typeof durationSec === 'number' && durationSec > LONG_CLIP_SECONDS;
+        function formatDuration(sec) {
+            return `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`;
+        }
 
-            if (!isLarge && !isLong) {
+        function escapeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        // Shows a warning when the chosen target size is under 4 MB
+        function updateLowSizeWarning() {
+            lowSizeWarning.classList.toggle('hidden', !(selectedTargetSizeMB < 4));
+        }
+
+        // Shows or hides the large-file / long-clip warning across the whole
+        // queue — fires as soon as any file's size is known, and again as
+        // each file's duration loads.
+        function updateQueueSizeWarning() {
+            const anyLarge = queue.some(item => item.file.size > LARGE_FILE_BYTES);
+            const anyLong = queue.some(item => item.status !== 'loading' && item.duration > LONG_CLIP_SECONDS);
+
+            if (!anyLarge && !anyLong) {
                 sizeWarning.classList.add('hidden');
                 return;
             }
 
-            if (isLarge && isLong) {
-                sizeWarningText.innerText = 'This file is over 500 MB and longer than 5 minutes. In-browser compression may be slow or run out of memory on this device.';
-            } else if (isLarge) {
-                sizeWarningText.innerText = 'This file is over 500 MB. In-browser compression may be slow or run out of memory on this device.';
+            const plural = queue.length > 1;
+            if (anyLarge && anyLong) {
+                sizeWarningText.innerText = `${plural ? 'One or more files are' : 'This file is'} over 500 MB and longer than 5 minutes. In-browser compression may be slow or run out of memory on this device.`;
+            } else if (anyLarge) {
+                sizeWarningText.innerText = `${plural ? 'One or more files are' : 'This file is'} over 500 MB. In-browser compression may be slow or run out of memory on this device.`;
             } else {
-                sizeWarningText.innerText = 'This clip is longer than 5 minutes. In-browser compression may take a while.';
+                sizeWarningText.innerText = `${plural ? 'One or more clips are' : 'This clip is'} longer than 5 minutes. In-browser compression may take a while.`;
             }
             sizeWarning.classList.remove('hidden');
         }
+
+        function updateQueueCount() {
+            queueCountEl.innerText = String(queue.length);
+        }
+
+        function updateCompressButtonLabel() {
+            if (isProcessingBatch) return;
+            compressBtn.textContent = queue.length > 1 ? `Compress all (${queue.length})` : 'Compress video';
+        }
+
+        function refreshCompressButtonState() {
+            if (isProcessingBatch) return;
+            compressBtn.disabled = queue.length === 0 || queue.some(item => item.status === 'loading');
+        }
+
+        // ---------- Queue rendering ----------
+
+        function renderQueueItem(item) {
+            const rowId = `row-${item.id}`;
+            const rowHtml = `
+                <div class="queue-item flex items-center gap-3 p-3 rounded-lg border" id="${rowId}" style="background: var(--bg-alt); border-color: var(--line);">
+                    <div class="queue-item-icon p-2.5 rounded-lg flex-shrink-0" style="background: var(--amber-dim); color: var(--amber);">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25h-9A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z" />
+                        </svg>
+                    </div>
+                    <div class="overflow-hidden flex-grow">
+                        <p class="text-sm font-medium truncate">${escapeHtml(item.file.name)}</p>
+                        <p class="queue-item-status text-xs mono" style="color:var(--text-dim)">Loading…</p>
+                    </div>
+                    <a class="queue-item-download hidden flex-shrink-0" download>Download</a>
+                </div>`;
+            queueList.insertAdjacentHTML('beforeend', rowHtml);
+
+            item.rowEl = document.getElementById(rowId);
+            item.statusEl = item.rowEl.querySelector('.queue-item-status');
+            item.iconEl = item.rowEl.querySelector('.queue-item-icon');
+            item.downloadEl = item.rowEl.querySelector('.queue-item-download');
+        }
+
+        function updateItemStatusText(item, phaseText) {
+            if (!item.statusEl) return;
+            switch (item.status) {
+                case 'loading':
+                    item.statusEl.innerText = 'Loading…';
+                    break;
+                case 'pending':
+                    item.statusEl.innerText = `${(item.file.size / (1024 * 1024)).toFixed(1)} MB · ${formatDuration(item.duration)}`;
+                    break;
+                case 'processing': {
+                    const percentLabel = typeof item.percent === 'number' ? ` · ${item.percent}%` : '';
+                    item.statusEl.innerText = `${phaseText || 'Compressing…'}${percentLabel}`;
+                    break;
+                }
+                case 'done':
+                    item.statusEl.innerText = `Done · ${item.sizeLabel}`;
+                    item.rowEl.classList.add('is-done');
+                    item.iconEl.style.background = 'var(--cyan-dim)';
+                    item.iconEl.style.color = 'var(--cyan)';
+                    item.downloadEl.href = item.downloadUrl;
+                    item.downloadEl.download = item.downloadName;
+                    item.downloadEl.classList.remove('hidden');
+                    item.downloadEl.classList.add('inline-flex', 'items-center', 'justify-center');
+                    break;
+                case 'error':
+                    item.statusEl.innerText = 'Failed — try again';
+                    item.rowEl.classList.add('is-error');
+                    item.iconEl.style.background = 'rgba(255,107,107,0.12)';
+                    item.iconEl.style.color = 'var(--danger)';
+                    break;
+            }
+        }
+
+        // ---------- File selection ----------
+
+        function addFilesToQueue(fileList) {
+            const incoming = Array.from(fileList).filter(f => f.type.startsWith('video/'));
+            if (incoming.length === 0) {
+                alert('Please choose video files.');
+                return;
+            }
+
+            const availableSlots = MAX_QUEUE_SIZE - queue.length;
+            if (availableSlots <= 0) {
+                alert(`You can queue up to ${MAX_QUEUE_SIZE} videos at a time. Clear the queue to add more.`);
+                return;
+            }
+
+            const filesToAdd = incoming.slice(0, availableSlots);
+            if (incoming.length > filesToAdd.length) {
+                alert(`Only ${filesToAdd.length} of ${incoming.length} files were added — ${MAX_QUEUE_SIZE} videos max.`);
+            }
+
+            filesToAdd.forEach(file => {
+                const item = {
+                    id: `f${nextItemId++}`,
+                    file,
+                    duration: 0,
+                    status: 'loading',
+                    percent: null,
+                };
+                queue.push(item);
+                renderQueueItem(item);
+
+                const videoEl = document.createElement('video');
+                videoEl.preload = 'metadata';
+                videoEl.src = URL.createObjectURL(file);
+                videoEl.onloadedmetadata = () => {
+                    item.duration = videoEl.duration;
+                    item.status = 'pending';
+                    updateItemStatusText(item);
+                    URL.revokeObjectURL(videoEl.src);
+                    updateQueueSizeWarning();
+                    refreshCompressButtonState();
+                };
+            });
+
+            updateQueueCount();
+            updateCompressButtonLabel();
+            refreshCompressButtonState();
+            updateQueueSizeWarning();
+
+            uploadView.classList.add('hidden');
+            processView.classList.remove('hidden');
+            progressContainer.classList.add('hidden');
+            sizeControls.classList.remove('opacity-40', 'pointer-events-none');
+        }
+
+        resetBtn.addEventListener('click', () => {
+            queue.forEach(item => {
+                if (item.downloadUrl) URL.revokeObjectURL(item.downloadUrl);
+            });
+            queue = [];
+            nextItemId = 1;
+            queueList.innerHTML = '';
+            updateQueueCount();
+            fileInput.value = '';
+            sizeWarning.classList.add('hidden');
+            progressContainer.classList.add('hidden');
+            isProcessingBatch = false;
+            updateCompressButtonLabel();
+            refreshCompressButtonState();
+            processView.classList.add('hidden');
+            uploadView.classList.remove('hidden');
+        });
 
         // Load the FFmpeg core as soon as the page opens
         async function initFFmpeg() {
@@ -592,59 +759,16 @@
         dropZone.addEventListener('drop', (e) => {
             e.preventDefault();
             dropZone.classList.remove('drag-over');
-            if (e.dataTransfer.files.length > 0) handleFileSelection(e.dataTransfer.files[0]);
+            if (e.dataTransfer.files.length > 0) addFilesToQueue(e.dataTransfer.files);
         });
         fileInput.addEventListener('change', (e) => {
-            if (e.target.files.length > 0) handleFileSelection(e.target.files[0]);
+            if (e.target.files.length > 0) addFilesToQueue(e.target.files);
         });
 
-        function handleFileSelection(file) {
-            if (!file.type.startsWith('video/')) {
-                alert('Please choose a video file.');
-                return;
-            }
-            selectedFile = file;
-            videoDurationSec = 0;
+        // ---------- Target size selection ----------
 
-            // Size is known immediately — check it before duration loads,
-            // so the warning (or its absence) reflects the new file right away.
-            updateSizeWarning(file);
-
-            // Read duration via a throwaway <video> element
-            const videoEl = document.createElement('video');
-            videoEl.preload = 'metadata';
-            videoEl.src = URL.createObjectURL(file);
-            videoEl.onloadedmetadata = () => {
-                videoDurationSec = videoEl.duration;
-                fileDetailsText.innerText = `${(file.size / (1024 * 1024)).toFixed(1)} MB · ${Math.floor(videoDurationSec / 60)}:${String(Math.floor(videoDurationSec % 60)).padStart(2, '0')}`;
-                // Recheck now that duration is available, in case the clip
-                // is long even though the file size alone was fine.
-                updateSizeWarning(file, videoDurationSec);
-                URL.revokeObjectURL(videoEl.src);
-            };
-
-            fileNameText.innerText = file.name;
-            uploadView.classList.add('hidden');
-            processView.classList.remove('hidden');
-
-            // Reset view state for a fresh file
-            downloadBtn.classList.add('hidden');
-            compressBtn.classList.remove('hidden');
-            progressContainer.classList.add('hidden');
-            sizeControls.classList.remove('opacity-40', 'pointer-events-none');
-        }
-
-        resetBtn.addEventListener('click', () => {
-            selectedFile = null;
-            videoDurationSec = 0;
-            fileInput.value = '';
-            sizeWarning.classList.add('hidden');
-            processView.classList.add('hidden');
-            uploadView.classList.remove('hidden');
-        });
-
-        // Target size selection — preset buttons set the value directly;
-        // the custom button instead reveals an input for a specific size.
+        // Preset buttons set the value directly; the custom button instead
+        // reveals an input for a specific size. Applies to every file in the queue.
         sizeButtons.forEach(btn => {
             btn.addEventListener('click', () => {
                 sizeButtons.forEach(b => b.classList.remove('is-selected'));
@@ -679,48 +803,27 @@
             }
         });
 
-        // Compression
-        compressBtn.addEventListener('click', async () => {
-            if (!ffmpeg.isLoaded()) {
-                alert('The compression engine is still loading — try again in a moment.');
-                return;
-            }
-            if (!selectedFile || videoDurationSec === 0) return;
-            if (customSizeBtn.classList.contains('is-selected') && !(parseFloat(customSizeInput.value) > 0)) {
-                alert('Enter a target size in MB first.');
-                customSizeInput.focus();
-                return;
-            }
+        // ---------- Compression ----------
 
-            compressBtn.disabled = true;
-            sizeControls.classList.add('opacity-40', 'pointer-events-none');
-            progressContainer.classList.remove('hidden');
-            progressBar.style.width = '0%';
-            progressPercent.innerText = '0%';
+        // Compresses a single queue item and updates its row as it goes.
+        async function compressQueueItem(item, fileIndex, totalCount) {
+            item.status = 'processing';
+            item.percent = 0;
+            updateItemStatusText(item);
 
-            const inputName = 'input_' + selectedFile.name;
-            const outputName = 'compressed_output.mp4';
+            const inputName = `input_${item.id}`;
+            const outputName = `output_${item.id}.mp4`;
 
+            let progressPhaseLabel = 'Compressing…';
             ffmpeg.setProgress(({ ratio }) => {
                 const percentage = Math.min(Math.max(Math.round(ratio * 100), 0), 100);
+                item.percent = percentage;
                 progressBar.style.width = `${percentage}%`;
                 progressPercent.innerText = `${percentage}%`;
-                progressText.innerText = percentage === 100 ? 'Wrapping up…' : 'Compressing…';
+                const phase = percentage === 100 ? 'Wrapping up…' : progressPhaseLabel;
+                progressText.innerText = totalCount > 1 ? `File ${fileIndex} of ${totalCount} — ${phase}` : phase;
+                updateItemStatusText(item, phase);
             });
-
-            // Target bitrate math: convert target size to bits, hold back 3%
-            // for container overhead, then split between video and audio.
-            const targetSizeBits = (selectedTargetSizeMB * 1024 * 1024 * 8) * 0.97;
-            const audioBitrateK = 128; // fixed audio allocation
-            const totalTargetBitrateK = Math.floor(targetSizeBits / videoDurationSec / 1000);
-            let videoBitrateK = totalTargetBitrateK - audioBitrateK;
-
-            // Guard against implausibly low video bitrates on very short/high targets
-            if (videoBitrateK < 64) {
-                videoBitrateK = Math.floor(totalTargetBitrateK * 0.85);
-            }
-
-            ffmpeg.FS('writeFile', inputName, await fetchFile(selectedFile));
 
             // Advanced settings: frame rate, resolution and encode speed.
             // Keyframes are held to roughly one every 2 seconds regardless
@@ -738,7 +841,21 @@
                 vfParts.push(`fps=${chosenFps}`);
             }
 
+            ffmpeg.FS('writeFile', inputName, await fetchFile(item.file));
+
             try {
+                // Target bitrate math: convert target size to bits, hold back
+                // 3% for container overhead, then split between video and audio.
+                const targetSizeBits = (selectedTargetSizeMB * 1024 * 1024 * 8) * 0.97;
+                const audioBitrateK = 128; // fixed audio allocation
+                const totalTargetBitrateK = Math.floor(targetSizeBits / item.duration / 1000);
+                let videoBitrateK = totalTargetBitrateK - audioBitrateK;
+
+                // Guard against implausibly low video bitrates on very short/high targets
+                if (videoBitrateK < 64) {
+                    videoBitrateK = Math.floor(totalTargetBitrateK * 0.85);
+                }
+
                 // Single-pass encode: force one video + one audio stream and
                 // apply the chosen frame rate / resolution / encode speed.
                 // Metadata (GPS location, device model, timestamps) is
@@ -773,26 +890,68 @@
                 await ffmpeg.run(...ffmpegArgs);
 
                 const data = ffmpeg.FS('readFile', outputName);
-                const compressedBlob = new Blob([data.buffer], { type: 'video/mp4' });
-                const downloadUrl = URL.createObjectURL(compressedBlob);
+                const blob = new Blob([data.buffer], { type: 'video/mp4' });
 
-                downloadBtn.href = downloadUrl;
-                downloadBtn.download = `${formatSizeForFilename(selectedTargetSizeMB)}mb-compressed-${randomSuffix(8)}.mp4`;
-
-                compressBtn.classList.add('hidden');
-                compressBtn.disabled = false;
-                downloadBtn.classList.remove('hidden');
-                progressText.innerText = 'Done — ready to download';
+                item.downloadUrl = URL.createObjectURL(blob);
+                item.downloadName = `${formatSizeForFilename(selectedTargetSizeMB)}mb-compressed-${randomSuffix(8)}.mp4`;
+                item.sizeLabel = `${(blob.size / (1024 * 1024)).toFixed(1)} MB`;
+                item.status = 'done';
             } catch (err) {
                 console.error(err);
-                alert('Something went wrong during compression. Try a different file or target size, or try using another web browser.');
-                compressBtn.disabled = false;
+                item.status = 'error';
             } finally {
                 // Clean up the virtual filesystem so memory doesn't build up across runs
                 try {
                     ffmpeg.FS('unlink', inputName);
                     ffmpeg.FS('unlink', outputName);
                 } catch (e) {}
+                updateItemStatusText(item);
+            }
+        }
+
+        compressBtn.addEventListener('click', async () => {
+            if (!ffmpeg.isLoaded()) {
+                alert('The compression engine is still loading — try again in a moment.');
+                return;
+            }
+            if (queue.length === 0 || queue.some(item => item.status === 'loading')) return;
+            if (customSizeBtn.classList.contains('is-selected') && !(parseFloat(customSizeInput.value) > 0)) {
+                alert('Enter a target size in MB first.');
+                customSizeInput.focus();
+                return;
+            }
+
+            isProcessingBatch = true;
+            compressBtn.disabled = true;
+            sizeControls.classList.add('opacity-40', 'pointer-events-none');
+            progressContainer.classList.remove('hidden');
+            progressBar.style.width = '0%';
+            progressPercent.innerText = '0%';
+
+            const pending = queue.filter(item => item.status === 'pending' || item.status === 'error');
+            let fileIndex = 0;
+            for (const item of pending) {
+                fileIndex++;
+                await compressQueueItem(item, fileIndex, pending.length);
+            }
+
+            isProcessingBatch = false;
+            sizeControls.classList.remove('opacity-40', 'pointer-events-none');
+
+            const doneCount = queue.filter(item => item.status === 'done').length;
+            const failCount = queue.filter(item => item.status === 'error').length;
+            progressBar.style.width = '100%';
+            progressPercent.innerText = '100%';
+            progressText.innerText = failCount > 0
+                ? `Done — ${doneCount} ready, ${failCount} failed`
+                : `Done — ${doneCount} file${doneCount === 1 ? '' : 's'} ready`;
+
+            if (failCount > 0) {
+                compressBtn.textContent = `Retry failed (${failCount})`;
+                compressBtn.disabled = false;
+            } else {
+                compressBtn.textContent = 'All done';
+                compressBtn.disabled = true;
             }
         });
     </script>

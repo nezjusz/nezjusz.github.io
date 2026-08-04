@@ -18,5 +18,9 @@
     {
         "name": "Epic Key Seller",
         "url": "./epickeysimulator/"
+    },
+    {
+        "name": "Blockcraft",
+        "url": "./test/"
     }
 ]

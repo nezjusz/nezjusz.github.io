@@ -32,16 +32,8 @@
   <!-- Settings button -->
   <div class="settings-wrapper">
     <button id="settingsBtn" class="settings-btn" type="button" aria-label="Open settings">
-      <svg class="settings-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <circle cx="12" cy="12" r="3"></circle>
-        <path d="M12 1v6"></path>
-        <path d="M12 17v6"></path>
-        <path d="M4.22 4.22l4.24 4.24"></path>
-        <path d="M15.54 15.54l4.24 4.24"></path>
-        <path d="M1 12h6"></path>
-        <path d="M17 12h6"></path>
-        <path d="M4.22 19.78l4.24-4.24"></path>
-        <path d="M15.54 8.46l4.24-4.24"></path>
+      <svg class="settings-icon" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true">
+        <path d="M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11.02L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.21,8.95 2.27,9.22 2.46,9.37L4.57,11.02C4.53,11.34 4.5,11.67 4.5,12C4.5,12.33 4.53,12.65 4.57,12.97L2.46,14.63C2.27,14.78 2.21,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.03 4.95,18.95L7.44,17.94C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.67 16.04,18.34 16.56,17.94L19.05,18.95C19.27,19.03 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z"></path>
       </svg>
     </button>
   </div>
@@ -456,9 +448,6 @@ function updateTime() {
   const pastDaysOfYear = (now - firstDayOfYear) / 86400000;
   const week = Math.ceil((pastDaysOfYear + firstDayOfYear.getDay() + 1) / 7);
   document.getElementById('day-name').textContent = `Week ${week}`;
-
-  const secondsIntoDay = hours * 3600 + now.getMinutes() * 60 + now.getSeconds();
-  document.getElementById('dayProgressFill').style.width = ((secondsIntoDay / 86400) * 100).toFixed(2) + '%';
 }
 
 /* ---- Search engine ---- */
@@ -900,7 +889,38 @@ loadWeather();
 updateTime();
 setInterval(updateTime, 1000);
 applySky();
-setInterval(applySky, 15000);
+
+/* ---- Smooth day/night loop (per-frame) ---- */
+(function tickSky() {
+  const auto = document.body.classList.contains('bg-auto');
+  if (auto) {
+    const now = new Date();
+    const minutes = now.getHours() * 60 + now.getMinutes() + now.getSeconds() / 60;
+    const v = dayFraction(minutes);
+    const warm = 1 - Math.abs(v * 2 - 1);
+
+    document.getElementById('skyDay').style.opacity = v;
+    document.getElementById('skyNight').style.opacity = 1 - v;
+    document.getElementById('skyWarm').style.opacity = warm * 0.9;
+    document.getElementById('skyStars').style.opacity = (1 - v) * 0.9;
+
+    const orb = document.getElementById('skyOrb');
+    const h = Math.sin(((minutes - 300) / 1800) * 2 * Math.PI);
+    orb.classList.toggle('orb-sun', h >= 0);
+    orb.classList.toggle('orb-moon', h < 0);
+    orb.style.left = (10 + (minutes / 1440) * 80) + '%';
+    orb.style.top = (h >= 0 ? 62 - h * 50 : 62 + h * 50) + '%';
+  }
+  requestAnimationFrame(tickSky);
+})();
+
+/* ---- Smooth day progress ---- */
+(function tickProgress() {
+  const el = document.getElementById('dayProgressFill');
+  const now = new Date();
+  el.style.width = ((now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds()) / 864).toFixed(4) + '%';
+  requestAnimationFrame(tickProgress);
+})();
 </script>
 
 </body>

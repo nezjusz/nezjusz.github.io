@@ -1,0 +1,9 @@
+[
+  {
+    "id": "sunny-park",
+    "name": "Sunny Park",
+    "description": "A peaceful park with a fountain, a little house and two trees.",
+    "author": "BlockWorks",
+    "file": "games/sunny-park.json"
+  }
+]

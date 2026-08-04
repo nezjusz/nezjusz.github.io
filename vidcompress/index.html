@@ -622,7 +622,7 @@
                         <p class="text-sm font-medium truncate">${escapeHtml(item.file.name)}</p>
                         <p class="queue-item-status text-xs mono" style="color:var(--text-dim)">Loading…</p>
                     </div>
-                    <a class="queue-item-download hidden inline-flex items-center justify-center flex-shrink-0" download>Download</a>
+                    <a class="queue-item-download hidden flex-shrink-0" download>Download</a>
                 </div>`;
             queueList.insertAdjacentHTML('beforeend', rowHtml);
 
@@ -654,6 +654,7 @@
                     item.downloadEl.href = item.downloadUrl;
                     item.downloadEl.download = item.downloadName;
                     item.downloadEl.classList.remove('hidden');
+                    item.downloadEl.classList.add('inline-flex', 'items-center', 'justify-center');
                     break;
                 case 'error':
                     item.statusEl.innerText = 'Failed — try again';

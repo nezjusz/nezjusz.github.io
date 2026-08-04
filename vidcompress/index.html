@@ -123,21 +123,6 @@
         .size-opt.is-selected .meter-label { color: var(--amber); }
         .size-opt.is-selected .meter-icon { color: var(--amber); }
 
-        .format-opt {
-            padding: 0.65rem;
-            border-radius: 6px;
-            border: 1px solid var(--line);
-            background: transparent;
-            color: var(--text-dim);
-            font-family: var(--font-mono);
-            font-size: 0.85rem;
-            letter-spacing: 0.04em;
-            cursor: pointer;
-            transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
-        }
-        .format-opt:hover { border-color: var(--line-strong); }
-        .format-opt.is-selected { border-color: var(--amber); background: var(--amber-dim); color: var(--amber); }
-
         .meter-icon { color: var(--text-dim); transition: color 0.15s ease; }
 
         /* Custom target size input, revealed under the meter row */
@@ -374,16 +359,6 @@
                     <p id="sizeWarningText"></p>
                 </div>
 
-                <!-- Output Format -->
-                <div class="space-y-3">
-                    <label class="text-xs font-semibold uppercase tracking-wider mono" style="color:var(--text-dim)">Output format</label>
-                    <div class="grid grid-cols-2 gap-2">
-                        <button data-format="mp4" id="formatMp4Btn" class="format-opt is-selected">MP4</button>
-                        <button data-format="gif" id="formatGifBtn" class="format-opt">GIF</button>
-                    </div>
-                    <p id="gifNote" class="text-xs hidden" style="color:var(--text-dim)">GIFs are sized by frame rate and resolution (below) rather than a target size — try 10–15 fps and 480p for a smaller file.</p>
-                </div>
-
                 <!-- Size Selector Options -->
                 <div id="sizeControls" class="space-y-3">
                     <label class="text-xs font-semibold uppercase tracking-wider mono" style="color:var(--text-dim)">Target size <span class="normal-case" style="color:var(--text-dim); opacity:0.75;">(applies to every file)</span></label>
@@ -530,8 +505,6 @@
         const customSizeInput = document.getElementById('customSizeInput');
         const sizeWarning = document.getElementById('sizeWarning');
         const sizeWarningText = document.getElementById('sizeWarningText');
-        const formatButtons = document.querySelectorAll('.format-opt');
-        const gifNote = document.getElementById('gifNote');
         const lowSizeWarning = document.getElementById('lowSizeWarning');
         const metadataToggle = document.getElementById('metadataToggle');
         const advancedToggleBtn = document.getElementById('advancedToggleBtn');
@@ -547,34 +520,11 @@
 
         let selectedTargetSizeMB = 8;
         let removeMetadata = true;
-        let outputFormat = 'mp4';
         let queue = [];
         let nextItemId = 1;
         let isProcessingBatch = false;
 
-        // ---------- Format / privacy / advanced settings ----------
-
-        formatButtons.forEach(btn => {
-            btn.addEventListener('click', () => {
-                formatButtons.forEach(b => b.classList.remove('is-selected'));
-                btn.classList.add('is-selected');
-                outputFormat = btn.dataset.format;
-
-                const isGif = outputFormat === 'gif';
-                sizeControls.classList.toggle('opacity-40', isGif);
-                sizeControls.classList.toggle('pointer-events-none', isGif);
-                gifNote.classList.toggle('hidden', !isGif);
-                updateCompressButtonLabel();
-
-                // GIF quality is driven by frame rate / resolution, not target
-                // size — surface those controls automatically.
-                if (isGif && advancedPanel.classList.contains('hidden')) {
-                    advancedPanel.classList.remove('hidden');
-                    advancedToggleBtn.classList.add('is-open');
-                    advancedToggleBtn.setAttribute('aria-expanded', 'true');
-                }
-            });
-        });
+        // ---------- Privacy / advanced settings ----------
 
         metadataToggle.addEventListener('click', () => {
             removeMetadata = !removeMetadata;
@@ -649,14 +599,7 @@
 
         function updateCompressButtonLabel() {
             if (isProcessingBatch) return;
-            const verb = outputFormat === 'gif' ? 'Convert' : 'Compress';
-            if (queue.length === 0) {
-                compressBtn.textContent = outputFormat === 'gif' ? 'Convert to GIF' : 'Compress video';
-            } else if (queue.length === 1) {
-                compressBtn.textContent = outputFormat === 'gif' ? 'Convert to GIF' : 'Compress video';
-            } else {
-                compressBtn.textContent = `${verb} all (${queue.length})`;
-            }
+            compressBtn.textContent = queue.length > 1 ? `Compress all (${queue.length})` : 'Compress video';
         }
 
         function refreshCompressButtonState() {
@@ -862,16 +805,13 @@
         // ---------- Compression ----------
 
         // Compresses a single queue item and updates its row as it goes.
-        // Runs the exact same MP4 bitrate-targeted or GIF palette-based
-        // pipeline used for a single file, just scoped to one item.
         async function compressQueueItem(item, fileIndex, totalCount) {
             item.status = 'processing';
             item.percent = 0;
             updateItemStatusText(item);
 
             const inputName = `input_${item.id}`;
-            const outputName = outputFormat === 'gif' ? `output_${item.id}.gif` : `output_${item.id}.mp4`;
-            const paletteName = `palette_${item.id}.png`;
+            const outputName = `output_${item.id}.mp4`;
 
             let progressPhaseLabel = 'Compressing…';
             ffmpeg.setProgress(({ ratio }) => {
@@ -886,7 +826,7 @@
 
             // Advanced settings: frame rate, resolution and encode speed.
             // Keyframes are held to roughly one every 2 seconds regardless
-            // of the chosen frame rate (MP4 only — GIF has no keyframes).
+            // of the chosen frame rate.
             const chosenFps = fpsSelect.value;
             const chosenResolution = resolutionSelect.value;
             const chosenPreset = speedSelect.value;
@@ -903,82 +843,56 @@
             ffmpeg.FS('writeFile', inputName, await fetchFile(item.file));
 
             try {
-                if (outputFormat === 'gif') {
-                    // Two-pass palette encode: ffmpeg's GIF output looks far
-                    // better generating a custom color palette first, then
-                    // applying it, rather than encoding directly.
-                    const gifFilterBase = vfParts.length > 0 ? vfParts.join(',') : 'null';
+                // Target bitrate math: convert target size to bits, hold back
+                // 3% for container overhead, then split between video and audio.
+                const targetSizeBits = (selectedTargetSizeMB * 1024 * 1024 * 8) * 0.97;
+                const audioBitrateK = 128; // fixed audio allocation
+                const totalTargetBitrateK = Math.floor(targetSizeBits / item.duration / 1000);
+                let videoBitrateK = totalTargetBitrateK - audioBitrateK;
 
-                    progressPhaseLabel = 'Building color palette…';
-                    await ffmpeg.run(
-                        '-i', inputName,
-                        '-vf', `${gifFilterBase === 'null' ? '' : gifFilterBase + ','}palettegen=stats_mode=diff`,
-                        paletteName
-                    );
-
-                    progressPhaseLabel = 'Rendering GIF…';
-                    await ffmpeg.run(
-                        '-i', inputName,
-                        '-i', paletteName,
-                        '-filter_complex', `${gifFilterBase}[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=3`,
-                        '-loop', '0',
-                        outputName
-                    );
-                } else {
-                    // Target bitrate math: convert target size to bits, hold back
-                    // 3% for container overhead, then split between video and audio.
-                    const targetSizeBits = (selectedTargetSizeMB * 1024 * 1024 * 8) * 0.97;
-                    const audioBitrateK = 128; // fixed audio allocation
-                    const totalTargetBitrateK = Math.floor(targetSizeBits / item.duration / 1000);
-                    let videoBitrateK = totalTargetBitrateK - audioBitrateK;
-
-                    // Guard against implausibly low video bitrates on very short/high targets
-                    if (videoBitrateK < 64) {
-                        videoBitrateK = Math.floor(totalTargetBitrateK * 0.85);
-                    }
-
-                    // Single-pass encode: force one video + one audio stream and
-                    // apply the chosen frame rate / resolution / encode speed.
-                    // Metadata (GPS location, device model, timestamps) is
-                    // dropped unless the person has turned that off.
-                    const ffmpegArgs = [
-                        '-i', inputName,
-                        '-threads', '2',
-                        '-map', '0:v:0',
-                        '-map', '0:a:0?',
-                    ];
-                    if (removeMetadata) {
-                        ffmpegArgs.push('-map_metadata', '-1');
-                    }
-                    ffmpegArgs.push(
-                        '-b:v', `${videoBitrateK}k`,
-                        '-c:v', 'libx264',
-                        '-preset', chosenPreset,
-                        '-g', String(gopSize),
-                        '-profile:v', 'high',
-                        '-level', '4.0',
-                        '-pix_fmt', 'yuv420p',
-                    );
-                    if (vfParts.length > 0) {
-                        ffmpegArgs.push('-vf', vfParts.join(','));
-                    }
-                    ffmpegArgs.push(
-                        '-b:a', `${audioBitrateK}k`,
-                        '-c:a', 'aac',
-                        '-movflags', '+faststart',
-                        outputName
-                    );
-                    await ffmpeg.run(...ffmpegArgs);
+                // Guard against implausibly low video bitrates on very short/high targets
+                if (videoBitrateK < 64) {
+                    videoBitrateK = Math.floor(totalTargetBitrateK * 0.85);
                 }
 
+                // Single-pass encode: force one video + one audio stream and
+                // apply the chosen frame rate / resolution / encode speed.
+                // Metadata (GPS location, device model, timestamps) is
+                // dropped unless the person has turned that off.
+                const ffmpegArgs = [
+                    '-i', inputName,
+                    '-threads', '2',
+                    '-map', '0:v:0',
+                    '-map', '0:a:0?',
+                ];
+                if (removeMetadata) {
+                    ffmpegArgs.push('-map_metadata', '-1');
+                }
+                ffmpegArgs.push(
+                    '-b:v', `${videoBitrateK}k`,
+                    '-c:v', 'libx264',
+                    '-preset', chosenPreset,
+                    '-g', String(gopSize),
+                    '-profile:v', 'high',
+                    '-level', '4.0',
+                    '-pix_fmt', 'yuv420p',
+                );
+                if (vfParts.length > 0) {
+                    ffmpegArgs.push('-vf', vfParts.join(','));
+                }
+                ffmpegArgs.push(
+                    '-b:a', `${audioBitrateK}k`,
+                    '-c:a', 'aac',
+                    '-movflags', '+faststart',
+                    outputName
+                );
+                await ffmpeg.run(...ffmpegArgs);
+
                 const data = ffmpeg.FS('readFile', outputName);
-                const isGif = outputFormat === 'gif';
-                const blob = new Blob([data.buffer], { type: isGif ? 'image/gif' : 'video/mp4' });
+                const blob = new Blob([data.buffer], { type: 'video/mp4' });
 
                 item.downloadUrl = URL.createObjectURL(blob);
-                item.downloadName = isGif
-                    ? `vidcompress-${randomSuffix(8)}.gif`
-                    : `${formatSizeForFilename(selectedTargetSizeMB)}mb-compressed-${randomSuffix(8)}.mp4`;
+                item.downloadName = `${formatSizeForFilename(selectedTargetSizeMB)}mb-compressed-${randomSuffix(8)}.mp4`;
                 item.sizeLabel = `${(blob.size / (1024 * 1024)).toFixed(1)} MB`;
                 item.status = 'done';
             } catch (err) {
@@ -990,9 +904,6 @@
                     ffmpeg.FS('unlink', inputName);
                     ffmpeg.FS('unlink', outputName);
                 } catch (e) {}
-                try {
-                    ffmpeg.FS('unlink', paletteName);
-                } catch (e) {}
                 updateItemStatusText(item);
             }
         }
@@ -1003,7 +914,7 @@
                 return;
             }
             if (queue.length === 0 || queue.some(item => item.status === 'loading')) return;
-            if (outputFormat === 'mp4' && customSizeBtn.classList.contains('is-selected') && !(parseFloat(customSizeInput.value) > 0)) {
+            if (customSizeBtn.classList.contains('is-selected') && !(parseFloat(customSizeInput.value) > 0)) {
                 alert('Enter a target size in MB first.');
                 customSizeInput.focus();
                 return;

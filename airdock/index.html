@@ -441,7 +441,7 @@
     <div id="connectSection">
       <div class="id-label" style="margin-bottom:12px;">Connect to a device</div>
       <div class="connect-row">
-        <input type="text" id="peerInput" placeholder="ENTER THEIR CODE" maxlength="9" autocomplete="off" spellcheck="false">
+        <input type="text" id="peerInput" placeholder="ENTER THEIR CODE" maxlength="8" autocomplete="off" spellcheck="false">
         <button class="btn" id="connectBtn">Connect</button>
       </div>
     </div>
@@ -519,10 +519,10 @@
   }
 
   function randCode(){
-    // human-friendly code: 4 letters - 4 digits style, base36 chunks
+    // human-friendly code: base36, 8 characters
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     let s = '';
-    for(let i=0;i<4;i++) s += chars[Math.floor(Math.random()*chars.length)];
+    for(let i=0;i<8;i++) s += chars[Math.floor(Math.random()*chars.length)];
     return s;
   }
 
@@ -535,7 +535,7 @@
 
     peer.on('open', id => {
       myCode = code;
-      myIdEl.innerHTML = code.slice(0,2) + '<span class="dash">·</span>' + code.slice(2);
+      myIdEl.innerHTML = code.slice(0,4) + '<span class="dash">·</span>' + code.slice(4);
       setStatus('live', 'ready on this network');
       radarSweep.classList.remove('paused');
       renderQR(code);
@@ -599,12 +599,12 @@
   connectBtn.addEventListener('click', doConnect);
   peerInput.addEventListener('keydown', e => { if(e.key === 'Enter') doConnect(); });
   peerInput.addEventListener('input', () => {
-    peerInput.value = peerInput.value.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,4);
+    peerInput.value = peerInput.value.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,8);
   });
 
   function doConnect(){
     const code = peerInput.value.trim().toUpperCase();
-    if(code.length < 4){ toast('Enter a 4-character code'); return; }
+    if(code.length < 8){ toast('Enter a 8-character code'); return; }
     if(!peer || peer.disconnected){ toast('Still connecting to network, try again in a second'); return; }
     connectBtn.disabled = true;
     connectBtn.textContent = 'Connecting…';
@@ -816,7 +816,7 @@
 
   // ---------- Auto-connect via URL hash ----------
   function checkHash(){
-    const m = location.hash.match(/c=([A-Z0-9]{4})/i);
+    const m = location.hash.match(/c=([A-Z0-9]{8})/i);
     if(m){
       peerInput.value = m[1].toUpperCase();
     }

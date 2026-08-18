@@ -604,7 +604,8 @@
 
   function doConnect(){
     const code = peerInput.value.trim().toUpperCase();
-    if(code.length < 8){ toast('Enter a 8-character code'); return; }
+    if(code.length < 8){ toast('Enter an 8-character code'); return; }
+    if(code === myCode){ toast('Cannot connect to your own device code'); return; }
     if(!peer || peer.disconnected){ toast('Still connecting to network, try again in a second'); return; }
     connectBtn.disabled = true;
     connectBtn.textContent = 'Connecting…';
@@ -818,10 +819,12 @@
   function checkHash(){
     const m = location.hash.match(/c=([A-Z0-9]{8})/i);
     if(m){
-      peerInput.value = m[1].toUpperCase();
+      const codeFromUrl = m[1].toUpperCase();
+      if(codeFromUrl !== myCode){
+        peerInput.value = codeFromUrl;
+      }
     }
   }
-  checkHash();
 
   initPeer();
 })();

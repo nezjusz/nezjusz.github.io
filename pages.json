@@ -16,15 +16,19 @@
         "url": "./vidcompress/"
     },
     {
+        "name": "Bulk Video Compressor",
+        "url": "./vidcompress/bulkcompress.html"
+    },
+    {
+        "name": "Video to GIF Maker",
+        "url": "./vidcompress/gif-test.html"
+    },
+    {
         "name": "Epic Key Seller",
         "url": "./epickeysimulator/"
     },
     {
         "name": "Airdock P2P File Sharing",
         "url": "./airdock/"
-    },
-    {
-        "name": "Blockcraft",
-        "url": "./test/"
     }
 ]

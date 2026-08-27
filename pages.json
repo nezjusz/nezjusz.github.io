@@ -1,34 +1,42 @@
 [
     {
         "name": "Simple Homepage",
-        "url": "./homepage/"
+        "url": "./homepage/",
+        "description": "A custom new tab start page with search engines, weather, and dynamic skies."
     },
     {
         "name": "TikTok Data Organiser",
-        "url": "./tiktokdataorganiser/"
+        "url": "./tiktokdataorganiser/",
+        "description": "Unpack and organise your TikTok data export without uploading it anywhere."
     },
     {
         "name": "Spotify Wrapped",
-        "url": "./spotifydatapackage/"
+        "url": "./spotifydatapackage/",
+        "description": "Turns your Spotify data export into a printable listening receipt."
     },
     {
         "name": "Video Compression Tool",
-        "url": "./vidcompress/"
+        "url": "./vidcompress/",
+        "description": "Compress video locally with ffmpeg.wasm — files never leave your device."
     },
     {
         "name": "Bulk Video Compressor",
-        "url": "./vidcompress/bulkcompress.html"
+        "url": "./vidcompress/bulkcompress.html",
+        "description": "Batch-compress whole folders of footage in one go, entirely offline."
     },
     {
         "name": "Video to GIF Maker",
-        "url": "./vidcompress/gif-test.html"
+        "url": "./vidcompress/gifmaker.html",
+        "description": "Convert video clips into GIFs right in the browser."
     },
     {
         "name": "Epic Key Seller",
-        "url": "./epickeysimulator/"
+        "url": "./epickeysimulator/",
+        "description": "Run a 3D key shop in this idle-selling simulator."
     },
     {
         "name": "Airdock P2P File Sharing",
-        "url": "./airdock/"
+        "url": "./airdock/",
+        "description": "Send files device-to-device over WebRTC with a QR code — no accounts, no cloud."
     }
 ]

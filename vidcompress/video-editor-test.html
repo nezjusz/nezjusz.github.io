@@ -2023,37 +2023,6 @@
     }
   }
 
-  // Mix base audio with overlay audio (audio overlays + non-muted video overlays),
-  // each delayed to its timeline start. Returns an audio filename, or throws so
-  // the caller can fall back to the base audio only.
-  async function buildMixedAudio(ff, baseName) {
-    await ff.run('-i', baseName, '-vn', '-c:a', 'aac', '-b:a', '192k', 'base.aac');
-    const items = [];
-    overlays.forEach((ov) => {
-      if (ov.type === 'audio' && ov.url) items.push({ src: ov.url, vol: ov.volume != null ? ov.volume : 1, start: ov.start, dur: ov.duration });
-      else if (ov.type === 'video' && ov.url && !ov.muted) items.push({ src: ov.url, vol: 1, start: ov.start, dur: ov.duration });
-    });
-    if (!items.length) return 'base.aac';
-    const inputs = ['-i', 'base.aac'];
-    const parts = ['[0:a]aresample=44100[a0]'];
-    for (let k = 0; k < items.length; k++) {
-      const it = items[k];
-      const fn = 'ova' + k + '.dat';
-      const buf = await fetchFile(it.src);
-      ff.FS('writeFile', fn, buf);
-      inputs.push('-t', (it.dur || 1).toFixed(3), '-i', fn);
-      const delay = Math.max(0, it.start).toFixed(3);
-      parts.push('[' + (k + 1) + ':a]adelay=delays=' + delay + 'S:all=1[d' + k + '];[d' + k + ']volume=' + (it.vol != null ? it.vol : 1) + '[v' + k + ']');
-      parts.push('[v' + k + ']aresample=44100[a' + (k + 1) + ']');
-    }
-    let amix = parts.join(';') + ';';
-    const al = [];
-    for (let k = 0; k <= items.length; k++) al.push('[a' + k + ']');
-    amix += al.join('') + 'amix=inputs=' + (items.length + 1) + ':normalize=0[aout]';
-    await ff.run(...inputs, '-filter_complex', amix, '-map', '[aout]', '-c:a', 'aac', '-b:a', '192k', 'mix.aac');
-    return 'mix.aac';
-  }
-
   // Build the base joined video (baseName), composite overlays frame-by-frame
   // onto a canvas (matched to the preview via resolveOverlay), capture with
   // MediaRecorder, then mux with the mixed audio via ffmpeg.
@@ -2112,18 +2081,12 @@
     const vidFile = await fetchFile(new Blob(chunks, { type: rec.mimeType || 'video/webm' }));
     ff.FS('writeFile', 'rec.webm', vidFile);
 
-    let audioName = null;
-    try { audioName = await buildMixedAudio(ff, baseName); } catch (e) { console.warn('overlay audio mix failed', e); audioName = null; }
-
     const outName = 'output.mp4';
-    const muxArgs = ['-i', 'rec.webm'];
-    if (audioName) {
-      muxArgs.push('-i', audioName, '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-map', '0:v:0', '-map', '1:a:0', '-c:a', 'aac', '-shortest', outName);
-    } else {
-      muxArgs.push('-i', baseName, '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-map', '0:v:0', '-map', '1:a:0?', '-c:a', 'copy', '-shortest', outName);
-    }
+    const muxArgs = ['-i', 'rec.webm', '-i', baseName,
+      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
+      '-map', '0:v:0', '-map', '1:a:0?', '-c:a', 'copy', '-shortest', outName];
     await ff.run(...muxArgs);
-    ['rec.webm', 'base.aac', 'mix.aac', 'ova0.dat', 'ova1.dat', 'ova2.dat', 'ova3.dat', 'ova4.dat'].forEach(n => { try { ff.FS('unlink', n); } catch (e) {} });
+    ['rec.webm'].forEach(n => { try { ff.FS('unlink', n); } catch (e) {} });
     return outName;
   }
 

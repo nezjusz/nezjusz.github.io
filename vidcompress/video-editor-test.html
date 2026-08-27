@@ -774,6 +774,14 @@
   function escapeHtml(s){ return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
   // ---------- interaction: select / trim / move / cut / delete ----------
+  function stopPlayback() {
+    if (!playing) return;
+    playing = false;
+    playIcon.innerHTML = '<path d="M8 5v14l11-7z"/>';
+    previewVideo.pause();
+    cancelAnimationFrame(rafId);
+  }
+
   function seekFromClientX(clientX) {
     const rect = trackWrap.getBoundingClientRect();
     const t = (clientX - rect.left + trackWrap.scrollLeft) / pxPerSec;
@@ -790,6 +798,7 @@
     }
     if (currentTool === 'select') {
       scrubbing = true;
+      stopPlayback();
       audioWrap.setPointerCapture(e.pointerId);
       seekFromClientX(e.clientX);
     }
@@ -802,6 +811,7 @@
     if (!block) {
       if (currentTool === 'select') {
         scrubbing = true;
+        stopPlayback();
         trackWrap.setPointerCapture(e.pointerId);
         seekFromClientX(e.clientX);
       }
@@ -830,7 +840,7 @@
 
     const rect = trackWrap.getBoundingClientRect();
     const t = (e.clientX - rect.left + trackWrap.scrollLeft) / pxPerSec;
-    if (t < totalDuration()) seekTo(t);
+    if (t < totalDuration()) { stopPlayback(); seekTo(t); }
 
     dragCtx = { type:'move', clipId, startX: e.clientX, moved:false };
     trackWrap.setPointerCapture(e.pointerId);
@@ -839,6 +849,7 @@
   ruler.addEventListener('pointerdown', (e) => {
     if (currentTool !== 'select') return;
     scrubbing = true;
+    stopPlayback();
     ruler.setPointerCapture(e.pointerId);
     seekFromClientX(e.clientX);
   });

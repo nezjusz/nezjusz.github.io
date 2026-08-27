@@ -1825,11 +1825,12 @@
     if (ffmpeg) return ffmpeg;
     ffmpeg = createFFmpeg({
       log: false,
-      // Must be an absolute URL: ffmpeg-core.js loads inside a Web Worker,
-      // which resolves relative paths against its own context, not the
-      // page's — a relative string here silently falls back to the
-      // library's built-in default path and fails to fetch.
-      corePath: new URL('ffmpeg-core.js', document.location.href).href,
+      // Pin the single-threaded core to a version that matches the
+      // @ffmpeg/ffmpeg wrapper (0.11.x). A mismatch between the wrapper and the
+      // core (or loading the multithreaded core without COOP/COEP) is what throws
+      // "RuntimeError: function signature mismatch" on the first run. Using an
+      // absolute CDN URL keeps the wasm/worker resolution stable.
+      corePath: 'https://unpkg.com/@ffmpeg/core@0.11.1/dist/umd/ffmpeg-core.js',
       progress: ({ ratio }) => {
         if (ratio >= 0 && ratio <= 1) {
           progressFill.style.width = (ratio * 100).toFixed(0) + '%';

@@ -1118,8 +1118,13 @@
   function syncOverlays() {
     const vt = virtualTime;
     overlays.forEach(ov => {
+      const selected = ov.id === selectedOverlayId;
+      const keyframing = selected && ((ov.anims && Object.keys(ov.anims).length > 0) || ov.autoKey);
       const active = vt >= ov.start && vt < ov.start + ov.duration;
-      if (!active) {
+      // Keep a selected, keyframing overlay visible and interactive so the user can
+      // preview and position it while placing keyframes, even if the playhead is
+      // briefly outside the clip's active window.
+      if (!active && !keyframing) {
         const e = ovEls.get(ov.id);
         if (e) { if (e.video) e.video.pause(); if (e.audio) e.audio.pause(); e.el.style.display = 'none'; }
         return;
@@ -1150,7 +1155,6 @@
       // Layer order: higher timeline row (lower track index) sits on top, like
       // layers in an editor, so overlaps are resolved consistently.
       elx.style.zIndex = String(100 - ov.track * 10);
-      const selected = ov.id === selectedOverlayId;
       elx.classList.toggle('selected', selected);
       elx.style.pointerEvents = (selected && ov.type !== 'audio') ? 'auto' : 'none';
       elx.querySelectorAll('.ov-handle').forEach(h => h.style.display = selected ? 'block' : 'none');
@@ -1455,15 +1459,15 @@
         if (ovPreviewCtx.type === 'move') {
           ov.x = Math.min(1, Math.max(0, ovPreviewCtx.startX + (e.clientX - ovPreviewCtx.startClientX) / rect.width));
           ov.y = Math.min(1, Math.max(0, ovPreviewCtx.startY + (e.clientY - ovPreviewCtx.startClientY) / rect.height));
-          if (ov.autoKey) { const lt = virtualTime - ov.start; upsertKeyframe(ov, 'x', lt, ov.x); upsertKeyframe(ov, 'y', lt, ov.y); }
+          if (ov.autoKey) { const lt = Math.max(0, Math.min(ov.duration, virtualTime - ov.start)); upsertKeyframe(ov, 'x', lt, ov.x); upsertKeyframe(ov, 'y', lt, ov.y); }
         } else if (ovPreviewCtx.type === 'resize') {
           const d = Math.hypot(e.clientX - ovPreviewCtx.cx, e.clientY - ovPreviewCtx.cy);
           ov.scale = Math.min(5, Math.max(0.05, ovPreviewCtx.startScale * (d / ovPreviewCtx.startDist)));
-          if (ov.autoKey) upsertKeyframe(ov, 'scale', virtualTime - ov.start, ov.scale);
+          if (ov.autoKey) upsertKeyframe(ov, 'scale', Math.max(0, Math.min(ov.duration, virtualTime - ov.start)), ov.scale);
         } else if (ovPreviewCtx.type === 'rotate') {
           const a = Math.atan2(e.clientY - ovPreviewCtx.cy, e.clientX - ovPreviewCtx.cx);
           ov.rotate = ovPreviewCtx.startRotate + (a - ovPreviewCtx.startAngle) * 180 / Math.PI;
-          if (ov.autoKey) upsertKeyframe(ov, 'rotate', virtualTime - ov.start, ov.rotate);
+          if (ov.autoKey) upsertKeyframe(ov, 'rotate', Math.max(0, Math.min(ov.duration, virtualTime - ov.start)), ov.rotate);
         }
         updateOverlayInspector();
         syncOverlays();

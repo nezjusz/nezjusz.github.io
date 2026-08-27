@@ -1271,6 +1271,10 @@
       if (isNaN(val)) val = 0;
     } else val = e.target.value;
     target[leaf] = val;
+    if (KF_PROPS.indexOf(prop) >= 0 && (ov.autoKey || (ov.anims && ov.anims[prop] && ov.anims[prop].length))) {
+      const lt = Math.max(0, Math.min(ov.duration, virtualTime - ov.start));
+      upsertKeyframe(ov, prop, lt, val);
+    }
     if (prop === 'track') ov.track = parseInt(e.target.value, 10);
     if (prop === 'start' && ov.start < 0) ov.start = 0;
     renderTimeline();
@@ -1459,15 +1463,21 @@
         if (ovPreviewCtx.type === 'move') {
           ov.x = Math.min(1, Math.max(0, ovPreviewCtx.startX + (e.clientX - ovPreviewCtx.startClientX) / rect.width));
           ov.y = Math.min(1, Math.max(0, ovPreviewCtx.startY + (e.clientY - ovPreviewCtx.startClientY) / rect.height));
-          if (ov.autoKey) { const lt = Math.max(0, Math.min(ov.duration, virtualTime - ov.start)); upsertKeyframe(ov, 'x', lt, ov.x); upsertKeyframe(ov, 'y', lt, ov.y); }
+          const lt = Math.max(0, Math.min(ov.duration, virtualTime - ov.start));
+          // Upsert a keyframe whenever the property is already keyframed (not just
+          // under auto-key), so the live drag preview tracks the rendered value.
+          if (ov.autoKey || (ov.anims && ov.anims.x)) upsertKeyframe(ov, 'x', lt, ov.x);
+          if (ov.autoKey || (ov.anims && ov.anims.y)) upsertKeyframe(ov, 'y', lt, ov.y);
         } else if (ovPreviewCtx.type === 'resize') {
           const d = Math.hypot(e.clientX - ovPreviewCtx.cx, e.clientY - ovPreviewCtx.cy);
           ov.scale = Math.min(5, Math.max(0.05, ovPreviewCtx.startScale * (d / ovPreviewCtx.startDist)));
-          if (ov.autoKey) upsertKeyframe(ov, 'scale', Math.max(0, Math.min(ov.duration, virtualTime - ov.start)), ov.scale);
+          const lt = Math.max(0, Math.min(ov.duration, virtualTime - ov.start));
+          if (ov.autoKey || (ov.anims && ov.anims.scale)) upsertKeyframe(ov, 'scale', lt, ov.scale);
         } else if (ovPreviewCtx.type === 'rotate') {
           const a = Math.atan2(e.clientY - ovPreviewCtx.cy, e.clientX - ovPreviewCtx.cx);
           ov.rotate = ovPreviewCtx.startRotate + (a - ovPreviewCtx.startAngle) * 180 / Math.PI;
-          if (ov.autoKey) upsertKeyframe(ov, 'rotate', Math.max(0, Math.min(ov.duration, virtualTime - ov.start)), ov.rotate);
+          const lt = Math.max(0, Math.min(ov.duration, virtualTime - ov.start));
+          if (ov.autoKey || (ov.anims && ov.anims.rotate)) upsertKeyframe(ov, 'rotate', lt, ov.rotate);
         }
         updateOverlayInspector();
         syncOverlays();

@@ -286,12 +286,15 @@
 
   .playhead{
     position:absolute; top:-20px; bottom:0; width:1px; background:var(--text);
-    z-index:6; pointer-events:none;
+    z-index:6; cursor:grab;
   }
   .playhead::before{
-    content:""; position:absolute; top:0; left:-5px; width:11px; height:11px;
+    content:""; position:absolute; top:0; left:-6px; width:13px; height:13px;
     background:var(--text); clip-path:polygon(0 0,100% 0,100% 55%,50% 100%,0 55%);
   }
+  .playhead:hover, .playhead.scrubbing{ background:var(--accent); }
+  .playhead:hover::before, .playhead.scrubbing::before{ background:var(--accent); }
+  .ruler{ cursor:pointer; }
 
   .empty-track{
     display:flex; align-items:center; justify-content:center; height:100%;
@@ -365,7 +368,11 @@
             <span>Precise cuts (re-encode)</span>
             <label class="switch"><input type="checkbox" id="preciseToggle"><span class="slider"></span></label>
           </div>
-          <div class="hint">Off: instant, cuts snap to the nearest keyframe. On: frame-accurate, takes longer to render.</div>
+          <div class="toggle-row" style="margin-top:8px;">
+            <span>Mute audio track</span>
+            <label class="switch"><input type="checkbox" id="muteToggle"><span class="slider"></span></label>
+          </div>
+          <div class="hint">Off: instant, cuts snap to the nearest keyframe. On: frame-accurate, takes longer to render. Multiple clips are always re-encoded to a matching frame rate to avoid a broken join.</div>
           <button class="btn btn-accent export-btn" id="exportBtn" style="margin-top:14px;">Export cut video</button>
           <div class="progress-wrap" id="progressWrap">
             <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
@@ -426,6 +433,7 @@
   let rafId = null;
   let currentTool = 'select';
   let dragCtx = null; // {type:'trim'|'move', clipId, edge, startX, startIn, startOut}
+  let scrubbing = false;
 
   const el = (id) => document.getElementById(id);
   const dropzone = el('dropzone'), fileInput = el('fileInput'), pickBtn = el('pickBtn'), addMoreBtn = el('addMoreBtn');
@@ -446,6 +454,12 @@
   }
 
   const uid = () => Math.random().toString(36).slice(2, 10);
+  const randomSuffix = (len) => {
+    const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+    let s = '';
+    for (let i = 0; i < len; i++) s += chars[Math.floor(Math.random() * chars.length)];
+    return s;
+  };
   const fmt = (s) => {
     if (!isFinite(s) || s < 0) s = 0;
     const m = Math.floor(s / 60), sec = s - m * 60;
@@ -600,15 +614,20 @@
   function escapeHtml(s){ return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
   // ---------- interaction: select / trim / move / cut / delete ----------
+  function seekFromClientX(clientX) {
+    const rect = trackWrap.getBoundingClientRect();
+    const t = (clientX - rect.left + trackWrap.scrollLeft) / pxPerSec;
+    seekTo(Math.max(0, Math.min(t, totalDuration())));
+  }
+
   trackWrap.addEventListener('mousedown', (e) => {
     const block = e.target.closest('.clip-block');
     const handle = e.target.closest('.handle');
 
     if (!block) {
       if (currentTool === 'select') {
-        const rect = trackWrap.getBoundingClientRect();
-        const t = (e.clientX - rect.left + trackWrap.scrollLeft) / pxPerSec;
-        seekTo(Math.max(0, Math.min(t, totalDuration())));
+        scrubbing = true;
+        seekFromClientX(e.clientX);
       }
       return;
     }
@@ -639,7 +658,14 @@
     dragCtx = { type:'move', clipId, startX: e.clientX, moved:false };
   });
 
+  ruler.addEventListener('mousedown', (e) => {
+    if (currentTool !== 'select') return;
+    scrubbing = true;
+    seekFromClientX(e.clientX);
+  });
+
   window.addEventListener('mousemove', (e) => {
+    if (scrubbing) { seekFromClientX(e.clientX); return; }
     if (!dragCtx) return;
     const clip = clips.find(c => c.id === dragCtx.clipId);
     if (!clip) return;
@@ -673,6 +699,7 @@
       updatePreviewSource();
     }
     dragCtx = null;
+    scrubbing = false;
   });
 
   function selectClip(id) {

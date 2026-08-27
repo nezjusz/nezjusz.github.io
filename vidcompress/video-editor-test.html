@@ -1119,12 +1119,13 @@
     const vt = virtualTime;
     overlays.forEach(ov => {
       const selected = ov.id === selectedOverlayId;
-      const keyframing = selected && ((ov.anims && Object.keys(ov.anims).length > 0) || ov.autoKey);
+      // During active playback the overlay must follow the timeline (hide outside
+      // its window) regardless of selection. The visibility relaxation below only
+      // applies while paused AND keyframing, so the user can see/position the
+      // overlay when placing keyframes without it being pinned on screen.
+      const forceVisible = selected && !playing && ((ov.anims && Object.keys(ov.anims).length > 0) || ov.autoKey);
       const active = vt >= ov.start && vt < ov.start + ov.duration;
-      // Keep a selected, keyframing overlay visible and interactive so the user can
-      // preview and position it while placing keyframes, even if the playhead is
-      // briefly outside the clip's active window.
-      if (!active && !keyframing) {
+      if (!active && !forceVisible) {
         const e = ovEls.get(ov.id);
         if (e) { if (e.video) e.video.pause(); if (e.audio) e.audio.pause(); e.el.style.display = 'none'; }
         return;

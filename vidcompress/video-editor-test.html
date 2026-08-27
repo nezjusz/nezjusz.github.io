@@ -81,9 +81,20 @@
     border:1px solid var(--line);
     padding:6px 11px; border-radius:100px;
     letter-spacing:0.02em;
+    transition:color .15s, background .15s, border-color .15s;
   }
   .pill .dot{width:6px; height:6px; border-radius:50%; background:var(--accent-2); box-shadow:0 0 6px var(--accent-2);}
   .pill.offline .dot{background:var(--accent);}
+
+  /* engine status badge: init (loading) / ready / error */
+  .pill.status-init{ color:var(--accent); background:var(--accent-dim); border-color:rgba(255,159,69,0.35); }
+  .pill.status-init .dot{ background:var(--accent); box-shadow:none; animation:blink 1.2s ease-in-out infinite; }
+  .pill.status-ready{ color:var(--accent-2); background:rgba(79,209,197,0.12); border-color:rgba(79,209,197,0.35); }
+  .pill.status-ready .dot{ background:var(--accent-2); box-shadow:0 0 6px var(--accent-2); animation:none; }
+  .pill.status-error{ color:var(--danger); background:rgba(255,92,92,0.1); border-color:rgba(255,92,92,0.35); }
+  .pill.status-error .dot{ background:var(--danger); box-shadow:none; animation:none; }
+  @keyframes blink{ 0%,100%{opacity:1;} 50%{opacity:0.3;} }
+  @media (prefers-reduced-motion: reduce){ .pill.status-init .dot{ animation:none; } }
 
   main{
     flex:1; display:flex; flex-direction:column;
@@ -307,7 +318,7 @@
   </div>
   <div class="tagline">on-device video cutter</div>
   <div class="spacer"></div>
-  <div class="pill offline" id="statusPill"><span class="dot"></span><span id="statusText">runs entirely in your browser</span></div>
+  <div class="pill status-init" id="statusPill"><span class="dot"></span><span id="statusText">Loading engine</span></div>
 </header>
 
 <main>
@@ -429,6 +440,11 @@
   const toolSelect = el('toolSelect'), toolCut = el('toolCut'), toolDelete = el('toolDelete');
   const statusText = el('statusText'), statusPill = el('statusPill');
 
+  function setStatus(state, text) {
+    statusPill.className = 'pill status-' + state;
+    statusText.textContent = text;
+  }
+
   const uid = () => Math.random().toString(36).slice(2, 10);
   const fmt = (s) => {
     if (!isFinite(s) || s < 0) s = 0;
@@ -439,8 +455,8 @@
   const clipDur = (c) => c.outPoint - c.inPoint;
 
   // ---------- file intake ----------
-  pickBtn.addEventListener('click', () => fileInput.click());
-  addMoreBtn.addEventListener('click', () => fileInput.click());
+  pickBtn.addEventListener('click', (e) => { e.stopPropagation(); fileInput.click(); });
+  addMoreBtn.addEventListener('click', (e) => { e.stopPropagation(); fileInput.click(); });
   dropzone.addEventListener('click', () => fileInput.click());
   fileInput.addEventListener('change', (e) => addFiles(e.target.files));
 
@@ -798,7 +814,11 @@
     if (ffmpeg) return ffmpeg;
     ffmpeg = createFFmpeg({
       log: false,
-      corePath: './ffmpeg-core.js',
+      // Must be an absolute URL: ffmpeg-core.js loads inside a Web Worker,
+      // which resolves relative paths against its own context, not the
+      // page's — a relative string here silently falls back to the
+      // library's built-in default path and fails to fetch.
+      corePath: new URL('ffmpeg-core.js', document.location.href).href,
       progress: ({ ratio }) => {
         if (ratio >= 0 && ratio <= 1) {
           progressFill.style.width = (ratio * 100).toFixed(0) + '%';
@@ -818,7 +838,7 @@
     progressWrap.classList.add('active');
     resultWrap.classList.remove('active');
     progressFill.style.width = '0%';
-    statusText.textContent = 'processing…';
+    setStatus('init', 'Rendering');
 
     try {
       const ff = await ensureFFmpeg();
@@ -868,9 +888,10 @@
     } catch (err) {
       console.error(err);
       progressLabel.textContent = 'Export failed — see console for details.';
+      setStatus('error', 'Render failed');
     } finally {
       exportBtn.disabled = false;
-      statusText.textContent = 'runs entirely in your browser';
+      if (statusPill.classList.contains('status-init')) setStatus('ready', 'Engine ready');
     }
   });
 
@@ -881,6 +902,23 @@
 
   // ---------- init ----------
   updateClock();
+
+  // Preload the ffmpeg core as soon as the page opens, so export doesn't
+  // stall on the first click. Non-fatal if it fails here — export retries.
+  (async () => {
+    if (!window.FFmpeg) {
+      setStatus('error', 'ffmpeg.min.js not found');
+      return;
+    }
+    setStatus('init', 'Loading engine');
+    try {
+      await ensureFFmpeg();
+      setStatus('ready', 'Engine ready');
+    } catch (err) {
+      console.error(err);
+      setStatus('error', 'Engine failed to load');
+    }
+  })();
 })();
 </script>
 </body>

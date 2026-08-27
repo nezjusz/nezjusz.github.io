@@ -2,7 +2,9 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
 <title>Kerf — on-device video cutter</title>
 <link rel="icon" href="favicon.ico">
 <script src="coi-serviceworker.js"></script>
@@ -243,7 +245,36 @@
     background:repeating-linear-gradient(90deg, var(--panel) 0px, var(--panel) 1px, var(--panel-alt) 1px, var(--panel-alt) 2px);
     background-color:var(--panel);
     border-radius:9px; border:1px solid var(--line);
+    touch-action:pan-x;
   }
+
+  .audio-wrap{
+    position:relative; height:44px; margin-top:6px;
+    background:var(--panel);
+    border-radius:9px; border:1px solid var(--line);
+    touch-action:pan-x;
+  }
+  .audio-block{
+    position:absolute; top:5px; bottom:5px;
+    border-radius:6px; overflow:hidden;
+    background:var(--panel-alt); border:1px solid var(--line-soft);
+  }
+  .audio-block svg{ width:100%; height:100%; display:block; }
+  .audio-block.muted{ background:rgba(255,92,92,0.05); }
+  .audio-block .no-audio{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    font-size:9.5px; color:var(--text-faint); letter-spacing:0.03em;
+  }
+  .mute-btn{
+    position:absolute; right:4px; top:4px; z-index:5;
+    width:20px; height:20px; border-radius:5px;
+    background:rgba(11,12,14,0.65); border:1px solid var(--line);
+    display:flex; align-items:center; justify-content:center; cursor:pointer;
+    color:var(--text-dim); transition:color .12s, border-color .12s, background .12s;
+  }
+  .mute-btn:hover{ color:var(--text); border-color:var(--text-faint); }
+  .mute-btn.is-muted{ color:var(--danger); border-color:rgba(255,92,92,0.4); background:rgba(255,92,92,0.12); }
+  .mute-btn svg{ width:12px; height:12px; }
   .clip-block{
     position:absolute; top:8px; bottom:8px;
     border-radius:7px; overflow:hidden;
@@ -252,6 +283,7 @@
     cursor:grab;
     transition:border-color .12s, box-shadow .12s;
     display:flex;
+    touch-action:none;
   }
   .clip-block.selected{ border-color:var(--accent); box-shadow:0 0 0 1px var(--accent), 0 4px 18px rgba(255,159,69,0.15); }
   .clip-block.dragging{ opacity:0.55; cursor:grabbing; }
@@ -268,8 +300,9 @@
     color:var(--accent-2); z-index:2; text-shadow:0 1px 3px rgba(0,0,0,0.8);
   }
   .handle{
-    position:absolute; top:0; bottom:0; width:9px; z-index:3;
+    position:absolute; top:0; bottom:0; width:16px; z-index:3;
     cursor:ew-resize; display:flex; align-items:center; justify-content:center;
+    touch-action:none;
   }
   .handle.left{ left:0; } .handle.right{ right:0; }
   .handle::before{
@@ -286,7 +319,7 @@
 
   .playhead{
     position:absolute; top:-20px; bottom:0; width:1px; background:var(--text);
-    z-index:6; cursor:grab;
+    z-index:6; cursor:grab; touch-action:none;
   }
   .playhead::before{
     content:""; position:absolute; top:0; left:-6px; width:13px; height:13px;
@@ -307,6 +340,28 @@
     .stage{ flex-direction:column; }
     .side-col{ width:auto; margin-left:0; margin-top:16px; flex-direction:row; flex-wrap:wrap; }
     .side-col .panel{ flex:1; min-width:220px; }
+  }
+
+  @media (max-width: 640px){
+    :root{ font-size:14px; }
+    header{ padding:12px 14px; gap:8px; flex-wrap:wrap; }
+    header .tagline{ display:none; }
+    .pill{ font-size:11px; padding:5px 9px; }
+    .stage{ padding:14px 14px 0; }
+    .preview-frame{ min-height:180px; border-radius:10px; }
+    .transport{ flex-wrap:wrap; gap:10px; padding:12px 2px 16px; }
+    .transport .zoom{ margin-left:0; order:3; width:100%; }
+    .transport .zoom input[type=range]{ flex:1; width:auto; }
+    .side-col{ margin-top:12px; gap:10px; }
+    .side-col .panel{ min-width:150px; padding:13px; }
+    .timeline-area{ padding:12px 14px 18px; }
+    .timeline-toolbar{ flex-wrap:wrap; gap:8px; }
+    .timeline-toolbar .add-more{ order:1; }
+    .tool-btn{ padding:8px 11px; font-size:12px; }
+    .tool-btn span, .tool-btn{ white-space:nowrap; }
+    .track-wrap{ height:76px; }
+    .clip-block .label{ font-size:10px; }
+    .handle{ width:20px; }
   }
 </style>
 </head>
@@ -369,7 +424,7 @@
             <label class="switch"><input type="checkbox" id="preciseToggle"><span class="slider"></span></label>
           </div>
           <div class="toggle-row" style="margin-top:8px;">
-            <span>Mute audio track</span>
+            <span>Mute all clips</span>
             <label class="switch"><input type="checkbox" id="muteToggle"><span class="slider"></span></label>
           </div>
           <div class="hint">Off: instant, cuts snap to the nearest keyframe. On: frame-accurate, takes longer to render. Multiple clips are always re-encoded to a matching frame rate and letterboxed to a shared resolution to avoid a broken join.</div>
@@ -410,6 +465,8 @@
         <div class="track-wrap" id="trackWrap">
           <div class="empty-track" id="emptyTrack">No clips yet</div>
         </div>
+        <div class="track-label">Audio</div>
+        <div class="audio-wrap" id="audioWrap"></div>
       </div>
     </div>
   </div>
@@ -437,7 +494,7 @@
 
   const el = (id) => document.getElementById(id);
   const dropzone = el('dropzone'), fileInput = el('fileInput'), pickBtn = el('pickBtn'), addMoreBtn = el('addMoreBtn');
-  const workspace = el('workspace'), trackWrap = el('trackWrap'), ruler = el('ruler'), emptyTrack = el('emptyTrack');
+  const workspace = el('workspace'), trackWrap = el('trackWrap'), ruler = el('ruler'), emptyTrack = el('emptyTrack'), audioWrap = el('audioWrap');
   const previewVideo = el('previewVideo'), previewEmpty = el('previewEmpty');
   const playBtn = el('playBtn'), playIcon = el('playIcon');
   const tcNow = el('tcNow'), tcTotal = el('tcTotal');
@@ -493,9 +550,10 @@
     for (const file of files) {
       const url = URL.createObjectURL(file);
       const meta = await probeMeta(url);
-      const clip = { id: uid(), file, url, name: file.name, duration: meta.duration, width: meta.width, height: meta.height, inPoint: 0, outPoint: meta.duration, thumbs: [] };
+      const clip = { id: uid(), file, url, name: file.name, duration: meta.duration, width: meta.width, height: meta.height, inPoint: 0, outPoint: meta.duration, thumbs: [], waveform: null, muted: false };
       clips.push(clip);
       generateThumbs(clip);
+      generateWaveform(clip);
     }
     workspace.classList.add('active');
     dropzone.style.display = 'none';
@@ -540,6 +598,53 @@
       });
     }
     renderTimeline();
+  }
+
+  async function generateWaveform(clip) {
+    try {
+      const buf = await clip.file.arrayBuffer();
+      const AC = window.AudioContext || window.webkitAudioContext;
+      const actx = new AC();
+      const audioBuf = await actx.decodeAudioData(buf.slice(0));
+      const raw = audioBuf.getChannelData(0);
+      const samples = 400;
+      const step = Math.max(1, Math.floor(raw.length / samples));
+      const peaks = new Array(samples).fill(0);
+      for (let i = 0; i < samples; i++) {
+        let sum = 0, start = i * step, count = 0;
+        for (let j = 0; j < step && start + j < raw.length; j++) { sum += Math.abs(raw[start + j]); count++; }
+        peaks[i] = count ? sum / count : 0;
+      }
+      const max = Math.max(...peaks, 0.0001);
+      clip.waveform = peaks.map(v => v / max);
+      actx.close();
+    } catch (e) {
+      clip.waveform = false; // decode failed or no audio track
+    }
+    renderTimeline();
+  }
+
+  function waveformPathFor(clip) {
+    if (!clip.waveform || !clip.waveform.length) return null;
+    const total = clip.waveform.length;
+    const startIdx = Math.max(0, Math.floor((clip.inPoint / clip.duration) * total));
+    const endIdx = Math.min(total, Math.max(startIdx + 1, Math.ceil((clip.outPoint / clip.duration) * total)));
+    const slice = clip.waveform.slice(startIdx, endIdx);
+    const n = slice.length;
+    const mid = 20;
+    let top = '', bottom = '';
+    slice.forEach((v, i) => {
+      const x = (i / (n - 1 || 1)) * 100;
+      const y = (mid - v * mid * 0.92).toFixed(2);
+      top += ` L${x.toFixed(2)} ${y}`;
+    });
+    for (let i = n - 1; i >= 0; i--) {
+      const v = slice[i];
+      const x = (i / (n - 1 || 1)) * 100;
+      const y = (mid + v * mid * 0.92).toFixed(2);
+      bottom += ` L${x.toFixed(2)} ${y}`;
+    }
+    return `M0 ${mid}` + top + bottom + ' Z';
   }
 
   // ---------- timeline rendering ----------
@@ -612,7 +717,44 @@
     ph.style.left = (virtualTime * pxPerSec) + 'px';
     trackWrap.appendChild(ph);
 
+    renderAudioTrack(total);
     updateInspector();
+  }
+
+  function renderAudioTrack(total) {
+    audioWrap.innerHTML = '';
+    audioWrap.style.width = (total * pxPerSec + 100) + 'px';
+    let cursor = 0;
+    clips.forEach((clip) => {
+      const w = clipDur(clip) * pxPerSec;
+      const block = document.createElement('div');
+      const effMuted = clip.muted;
+      block.className = 'audio-block' + (effMuted ? ' muted' : '');
+      block.style.left = (cursor * pxPerSec) + 'px';
+      block.style.width = Math.max(w, 4) + 'px';
+
+      if (clip.waveform === false) {
+        block.innerHTML = '<div class="no-audio">no audio</div>';
+      } else if (!clip.waveform) {
+        block.innerHTML = '<div class="no-audio">decoding…</div>';
+      } else {
+        const d = waveformPathFor(clip);
+        const fill = effMuted ? 'var(--text-faint)' : 'var(--accent-2)';
+        block.innerHTML = `<svg viewBox="0 0 100 40" preserveAspectRatio="none"><path d="${d}" fill="${fill}" opacity="${effMuted ? 0.35 : 0.6}"/></svg>`;
+      }
+
+      const muteBtn = document.createElement('div');
+      muteBtn.className = 'mute-btn' + (effMuted ? ' is-muted' : '');
+      muteBtn.dataset.id = clip.id;
+      muteBtn.title = effMuted ? 'Unmute this clip' : 'Mute this clip';
+      muteBtn.innerHTML = effMuted
+        ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 5L6 9H3v6h3l5 4V5z"/><path d="M23 9l-6 6M17 9l6 6"/></svg>'
+        : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 5L6 9H3v6h3l5 4V5z"/><path d="M15.5 8.5a5 5 0 010 7"/></svg>';
+      block.appendChild(muteBtn);
+
+      audioWrap.appendChild(block);
+      cursor += clipDur(clip);
+    });
   }
 
   function escapeHtml(s){ return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -624,13 +766,29 @@
     seekTo(Math.max(0, Math.min(t, totalDuration())));
   }
 
-  trackWrap.addEventListener('mousedown', (e) => {
+  audioWrap.addEventListener('pointerdown', (e) => {
+    const btn = e.target.closest('.mute-btn');
+    if (btn) {
+      e.stopPropagation();
+      const clip = clips.find(c => c.id === btn.dataset.id);
+      if (clip) { clip.muted = !clip.muted; renderTimeline(); }
+      return;
+    }
+    if (currentTool === 'select') {
+      scrubbing = true;
+      audioWrap.setPointerCapture(e.pointerId);
+      seekFromClientX(e.clientX);
+    }
+  });
+
+  trackWrap.addEventListener('pointerdown', (e) => {
     const block = e.target.closest('.clip-block');
     const handle = e.target.closest('.handle');
 
     if (!block) {
       if (currentTool === 'select') {
         scrubbing = true;
+        trackWrap.setPointerCapture(e.pointerId);
         seekFromClientX(e.clientX);
       }
       return;
@@ -651,6 +809,7 @@
     if (handle) {
       const clip = clips.find(c => c.id === clipId);
       dragCtx = { type:'trim', clipId, edge: handle.dataset.edge, startX: e.clientX, startIn: clip.inPoint, startOut: clip.outPoint };
+      trackWrap.setPointerCapture(e.pointerId);
       e.stopPropagation();
       return;
     }
@@ -660,15 +819,17 @@
     if (t < totalDuration()) seekTo(t);
 
     dragCtx = { type:'move', clipId, startX: e.clientX, moved:false };
+    trackWrap.setPointerCapture(e.pointerId);
   });
 
-  ruler.addEventListener('mousedown', (e) => {
+  ruler.addEventListener('pointerdown', (e) => {
     if (currentTool !== 'select') return;
     scrubbing = true;
+    ruler.setPointerCapture(e.pointerId);
     seekFromClientX(e.clientX);
   });
 
-  window.addEventListener('mousemove', (e) => {
+  window.addEventListener('pointermove', (e) => {
     if (scrubbing) { seekFromClientX(e.clientX); return; }
     if (!dragCtx) return;
     const clip = clips.find(c => c.id === dragCtx.clipId);
@@ -698,7 +859,7 @@
     }
   });
 
-  window.addEventListener('mouseup', () => {
+  window.addEventListener('pointerup', () => {
     if (dragCtx && (dragCtx.type === 'trim')) {
       updatePreviewSource();
     }
@@ -743,6 +904,7 @@
       <div class="row"><span>Out</span><b>${clip.outPoint.toFixed(2)}s</b></div>
       <div class="row"><span>Length</span><b>${clipDur(clip).toFixed(2)}s</b></div>
       <div class="row"><span>Source dur.</span><b>${clip.duration.toFixed(2)}s</b></div>
+      <div class="row"><span>Audio</span><b>${clip.waveform === false ? 'none' : (clip.muted ? 'muted' : 'audible')}</b></div>
     `;
   }
 
@@ -783,10 +945,16 @@
     if (previewVideo.dataset.clipId !== hit.clip.id) {
       previewVideo.src = hit.clip.url;
       previewVideo.dataset.clipId = hit.clip.id;
-      previewVideo.onloadedmetadata = () => { previewVideo.currentTime = hit.local; };
+      previewVideo.muted = !!hit.clip.muted;
+      previewVideo.volume = 1;
+      previewVideo.onloadedmetadata = () => {
+        previewVideo.currentTime = hit.local;
+        if (playing) previewVideo.play().catch(()=>{});
+      };
     } else if (Math.abs(previewVideo.currentTime - hit.local) > 0.08) {
       previewVideo.currentTime = hit.local;
     }
+    previewVideo.muted = !!hit.clip.muted;
   }
 
   function seekTo(t) {
@@ -901,20 +1069,26 @@
 
         const dur = (c.outPoint - c.inPoint).toFixed(3);
         const ss = c.inPoint.toFixed(3);
-        const args = ['-ss', ss, '-i', inputName, '-t', dur];
+        const effMute = mute || c.muted;
+        const args = ['-ss', ss, '-i', inputName];
+
         if (reencode) {
+          if (effMute) {
+            // A muted clip still needs an audio stream when it's joining
+            // others, or the concat demuxer sees mismatched stream layouts
+            // and the join breaks — so splice in true silence instead of
+            // dropping the track outright.
+            args.push('-f', 'lavfi', '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100');
+            args.push('-map', '0:v:0', '-map', '1:a:0', '-shortest');
+          } else {
+            args.push('-map', '0:v:0', '-map', '0:a:0?');
+          }
           // -threads 1 sidesteps a "function signature mismatch" crash the
           // multi-threaded ffmpeg.wasm core hits on some filter chains.
-          args.push('-threads', '1', '-vf', normalizeVf, '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20');
+          args.push('-t', dur, '-threads', '1', '-vf', normalizeVf, '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-c:a', 'aac');
         } else {
-          args.push('-c:v', 'copy');
-        }
-        if (mute) {
-          args.push('-an');
-        } else if (reencode) {
-          args.push('-c:a', 'aac');
-        } else {
-          args.push('-c:a', 'copy');
+          args.push('-t', dur, '-c:v', 'copy');
+          if (effMute) { args.push('-an'); } else { args.push('-c:a', 'copy'); }
         }
         args.push(outputName);
         await ff.run(...args);
@@ -931,10 +1105,10 @@
         const listContent = segmentNames.map(n => `file '${n}'`).join('\n');
         ff.FS('writeFile', 'list.txt', new TextEncoder().encode(listContent));
         const concatArgs = ['-f', 'concat', '-safe', '0', '-i', 'list.txt'];
-        // Segments are already normalized above, so the join itself can
-        // always be a plain stream copy — fast, and avoids re-encoding twice.
+        // Segments are already normalized (and given matching audio
+        // streams, real or silent) above, so the join itself can always be
+        // a plain stream copy — fast, and avoids re-encoding twice.
         concatArgs.push('-c', 'copy');
-        if (mute) concatArgs.push('-an');
         concatArgs.push(finalName);
         await ff.run(...concatArgs);
       }

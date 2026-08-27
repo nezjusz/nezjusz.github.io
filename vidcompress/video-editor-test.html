@@ -148,7 +148,7 @@
     display:flex; align-items:center; justify-content:center;
     min-height:220px;
   }
-  .preview-frame video{ max-width:100%; max-height:100%; display:block; }
+  .preview-frame video{ max-width:100%; max-height:100%; display:block; cursor:pointer; }
   .preview-frame .empty-hint{ color:var(--text-faint); font-size:13px; }
   .transport{
     display:flex; align-items:center; gap:14px;
@@ -162,6 +162,15 @@
   }
   .transport button.play:hover{ filter:brightness(1.08); }
   .transport button.play svg{ width:14px; height:14px; }
+  .transport button.icon-btn{
+    width:34px; height:34px; border-radius:50%; flex-shrink:0;
+    background:var(--panel-alt); border:1px solid var(--line); color:var(--text-dim);
+    display:flex; align-items:center; justify-content:center; cursor:pointer;
+    transition:color .12s, border-color .12s, background .12s;
+  }
+  .transport button.icon-btn:hover{ color:var(--text); border-color:var(--text-faint); }
+  .transport button.icon-btn.muted{ color:var(--danger); border-color:rgba(255,92,92,0.4); }
+  .transport button.icon-btn svg{ width:16px; height:16px; }
   .tc{ font-family:'JetBrains Mono', monospace; font-size:13px; color:var(--text-dim); white-space:nowrap; }
   .tc .now{ color:var(--text); }
   .transport .zoom{ margin-left:auto; display:flex; align-items:center; gap:10px; color:var(--text-faint); font-size:11.5px; }
@@ -403,6 +412,9 @@
           <button class="play" id="playBtn" title="Play/Pause">
             <svg id="playIcon" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
           </button>
+          <button class="icon-btn" id="muteBtn" title="Mute / Unmute preview audio">
+            <svg id="muteIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5L6 9H3v6h3l5 4V5z"/><path d="M15.5 8.5a5 5 0 010 7"/><path d="M18.5 5.5a9 9 0 010 13"/></svg>
+          </button>
           <div class="tc"><span class="now" id="tcNow">00:00.0</span> / <span id="tcTotal">00:00.0</span></div>
           <div class="zoom">
             zoom
@@ -486,6 +498,7 @@
   let selectedId = null;
   let pxPerSec = 80;
   let playing = false;
+  let previewMuted = false;
   let virtualTime = 0;
   let rafId = null;
   let currentTool = 'select';
@@ -497,6 +510,7 @@
   const workspace = el('workspace'), trackWrap = el('trackWrap'), ruler = el('ruler'), emptyTrack = el('emptyTrack'), audioWrap = el('audioWrap');
   const previewVideo = el('previewVideo'), previewEmpty = el('previewEmpty');
   const playBtn = el('playBtn'), playIcon = el('playIcon');
+  const muteBtn = el('muteBtn'), muteIcon = el('muteIcon');
   const tcNow = el('tcNow'), tcTotal = el('tcTotal');
   const zoomRange = el('zoomRange');
   const inspectorBody = el('inspectorBody');
@@ -942,10 +956,11 @@
     if (!hit) { previewEmpty.style.display = 'block'; previewVideo.style.display='none'; return; }
     previewEmpty.style.display = 'none';
     previewVideo.style.display = 'block';
+    const muted = effectiveMute(hit.clip);
     if (previewVideo.dataset.clipId !== hit.clip.id) {
       previewVideo.src = hit.clip.url;
       previewVideo.dataset.clipId = hit.clip.id;
-      previewVideo.muted = !!hit.clip.muted;
+      previewVideo.muted = muted;
       previewVideo.volume = 1;
       previewVideo.onloadedmetadata = () => {
         previewVideo.currentTime = hit.local;
@@ -954,7 +969,27 @@
     } else if (Math.abs(previewVideo.currentTime - hit.local) > 0.08) {
       previewVideo.currentTime = hit.local;
     }
-    previewVideo.muted = !!hit.clip.muted;
+    previewVideo.muted = muted;
+    updateMuteUI();
+  }
+
+  // Preview audio = user's manual preview mute, the clip's own mute flag, or
+  // the global "Mute all clips" toggle. Kept separate from export-only flags
+  // so muting the preview never changes what gets exported.
+  function effectiveMute(clip) {
+    return previewMuted || !!clip.muted || !!el('muteToggle').checked;
+  }
+
+  let _muteUiState = null;
+  function updateMuteUI() {
+    const m = previewVideo.muted;
+    if (_muteUiState === m) return;
+    _muteUiState = m;
+    muteBtn.classList.toggle('muted', m);
+    muteBtn.title = m ? 'Unmute preview audio' : 'Mute preview audio';
+    muteIcon.innerHTML = m
+      ? '<path d="M11 5L6 9H3v6h3l5 4V5z"/><path d="M23 9l-6 6M17 9l6 6"/>'
+      : '<path d="M11 5L6 9H3v6h3l5 4V5z"/><path d="M15.5 8.5a5 5 0 010 7"/><path d="M18.5 5.5a9 9 0 010 13"/>';
   }
 
   function seekTo(t) {
@@ -975,6 +1010,9 @@
       ? '<path d="M6 5h4v14H6zM14 5h4v14h-4z"/>'
       : '<path d="M8 5v14l11-7z"/>';
     if (playing) {
+      const hit = findClipAt(virtualTime);
+      previewVideo.muted = hit ? effectiveMute(hit.clip) : previewMuted;
+      updateMuteUI();
       previewVideo.play().catch(()=>{});
       lastFrame = performance.now();
       rafId = requestAnimationFrame(loop);
@@ -984,6 +1022,26 @@
     }
   }
   playBtn.addEventListener('click', togglePlay);
+
+  // Click the preview itself to play/pause — common expectation, and the
+  // gesture also satisfies the browser's autoplay policy for audio.
+  previewVideo.addEventListener('click', togglePlay);
+
+  // Dedicated mute control for the preview (separate from export settings).
+  muteBtn.addEventListener('click', () => {
+    previewMuted = !previewMuted;
+    const hit = findClipAt(virtualTime);
+    previewVideo.muted = hit ? effectiveMute(hit.clip) : previewMuted;
+    updateMuteUI();
+  });
+
+  // Honor the global "Mute all clips" toggle live in the preview too.
+  el('muteToggle').addEventListener('change', () => {
+    if (!playing && !previewVideo.src) return;
+    const hit = findClipAt(virtualTime);
+    previewVideo.muted = hit ? effectiveMute(hit.clip) : previewMuted;
+    updateMuteUI();
+  });
 
   let lastFrame = 0;
   function loop(now) {

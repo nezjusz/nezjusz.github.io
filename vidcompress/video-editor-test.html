@@ -372,7 +372,7 @@
             <span>Mute audio track</span>
             <label class="switch"><input type="checkbox" id="muteToggle"><span class="slider"></span></label>
           </div>
-          <div class="hint">Off: instant, cuts snap to the nearest keyframe. On: frame-accurate, takes longer to render. Multiple clips are always re-encoded to a matching frame rate to avoid a broken join.</div>
+          <div class="hint">Off: instant, cuts snap to the nearest keyframe. On: frame-accurate, takes longer to render. Multiple clips are always re-encoded to a matching frame rate and letterboxed to a shared resolution to avoid a broken join.</div>
           <button class="btn btn-accent export-btn" id="exportBtn" style="margin-top:14px;">Export cut video</button>
           <div class="progress-wrap" id="progressWrap">
             <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
@@ -492,8 +492,8 @@
     if (!files.length) return;
     for (const file of files) {
       const url = URL.createObjectURL(file);
-      const duration = await probeDuration(url);
-      const clip = { id: uid(), file, url, name: file.name, duration, inPoint: 0, outPoint: duration, thumbs: [] };
+      const meta = await probeMeta(url);
+      const clip = { id: uid(), file, url, name: file.name, duration: meta.duration, width: meta.width, height: meta.height, inPoint: 0, outPoint: meta.duration, thumbs: [] };
       clips.push(clip);
       generateThumbs(clip);
     }
@@ -504,13 +504,17 @@
     updatePreviewSource();
   }
 
-  function probeDuration(url) {
+  function probeMeta(url) {
     return new Promise((resolve) => {
       const v = document.createElement('video');
       v.preload = 'metadata';
       v.src = url;
-      v.onloadedmetadata = () => resolve(v.duration || 0);
-      v.onerror = () => resolve(0);
+      v.onloadedmetadata = () => resolve({
+        duration: v.duration || 0,
+        width: v.videoWidth || 1280,
+        height: v.videoHeight || 720
+      });
+      v.onerror = () => resolve({ duration: 0, width: 1280, height: 720 });
     });
   }
 
@@ -870,6 +874,22 @@
     try {
       const ff = await ensureFFmpeg();
       const precise = el('preciseToggle').checked;
+      const mute = el('muteToggle').checked;
+      // Mixing clips of different frame rates and/or resolutions through a
+      // stream-copy concat corrupts timestamps and geometry (long, glitched
+      // output), so as soon as there's more than one clip, always re-encode
+      // everything to a shared frame rate and a shared, letterboxed frame
+      // size — matching the largest clip in the sequence.
+      const forceReencode = clips.length > 1;
+      const reencode = precise || forceReencode;
+      const targetFps = 30;
+      let targetW = clips[0]?.width || 1280;
+      let targetH = clips[0]?.height || 720;
+      clips.forEach(c => { if ((c.width||0) * (c.height||0) > targetW * targetH) { targetW = c.width; targetH = c.height; } });
+      // even dimensions only — libx264 requires them
+      targetW = targetW % 2 === 0 ? targetW : targetW - 1;
+      targetH = targetH % 2 === 0 ? targetH : targetH - 1;
+      const normalizeVf = `scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease,pad=${targetW}:${targetH}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=${targetFps},format=yuv420p`;
       const segmentNames = [];
 
       for (let i = 0; i < clips.length; i++) {
@@ -881,9 +901,22 @@
 
         const dur = (c.outPoint - c.inPoint).toFixed(3);
         const ss = c.inPoint.toFixed(3);
-        const args = precise
-          ? ['-ss', ss, '-i', inputName, '-t', dur, '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-c:a', 'aac', outputName]
-          : ['-ss', ss, '-i', inputName, '-t', dur, '-c', 'copy', outputName];
+        const args = ['-ss', ss, '-i', inputName, '-t', dur];
+        if (reencode) {
+          // -threads 1 sidesteps a "function signature mismatch" crash the
+          // multi-threaded ffmpeg.wasm core hits on some filter chains.
+          args.push('-threads', '1', '-vf', normalizeVf, '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20');
+        } else {
+          args.push('-c:v', 'copy');
+        }
+        if (mute) {
+          args.push('-an');
+        } else if (reencode) {
+          args.push('-c:a', 'aac');
+        } else {
+          args.push('-c:a', 'copy');
+        }
+        args.push(outputName);
         await ff.run(...args);
         segmentNames.push(outputName);
         try { ff.FS('unlink', inputName); } catch(e){}
@@ -897,18 +930,21 @@
       } else {
         const listContent = segmentNames.map(n => `file '${n}'`).join('\n');
         ff.FS('writeFile', 'list.txt', new TextEncoder().encode(listContent));
-        if (precise) {
-          await ff.run('-f', 'concat', '-safe', '0', '-i', 'list.txt', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-c:a', 'aac', finalName);
-        } else {
-          await ff.run('-f', 'concat', '-safe', '0', '-i', 'list.txt', '-c', 'copy', finalName);
-        }
+        const concatArgs = ['-f', 'concat', '-safe', '0', '-i', 'list.txt'];
+        // Segments are already normalized above, so the join itself can
+        // always be a plain stream copy — fast, and avoids re-encoding twice.
+        concatArgs.push('-c', 'copy');
+        if (mute) concatArgs.push('-an');
+        concatArgs.push(finalName);
+        await ff.run(...concatArgs);
       }
 
       const data = ff.FS('readFile', finalName);
       const blob = new Blob([data.buffer], { type: 'video/mp4' });
       const url = URL.createObjectURL(blob);
+      const filename = `kerf-export-${randomSuffix(8)}.mp4`;
       downloadLink.href = url;
-      downloadLink.download = 'kerf-export.mp4';
+      downloadLink.download = filename;
       resultWrap.classList.add('active');
       progressLabel.textContent = 'Done.';
       progressFill.style.width = '100%';
@@ -920,6 +956,10 @@
       exportBtn.disabled = false;
       if (statusPill.classList.contains('status-init')) setStatus('ready', 'Engine ready');
     }
+  });
+
+  downloadLink.addEventListener('click', () => {
+    setTimeout(() => resultWrap.classList.remove('active'), 3000);
   });
 
   function extOf(name) {

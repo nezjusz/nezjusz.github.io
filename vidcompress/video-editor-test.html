@@ -1120,6 +1120,23 @@
     }
     renderTimeline(); syncOverlays(); updateOverlayInspector();
   }
+  // Resolve an overlay's full render state at a given virtual time, including
+  // keyframe interpolation. Shared by the live preview and the exporter so the
+  // baked output matches what the user sees exactly.
+  function resolveOverlay(ov, vt) {
+    const localT = vt - ov.start;
+    const active = localT >= 0 && localT < ov.duration;
+    const a = (ov.anims && Object.keys(ov.anims).length) ? evalAnim(ov, localT) : {};
+    return {
+      active, localT,
+      x: a.x != null ? a.x : (ov.x != null ? ov.x : 0.5),
+      y: a.y != null ? a.y : (ov.y != null ? ov.y : 0.5),
+      scale: a.scale != null ? a.scale : (ov.scale != null ? ov.scale : 1),
+      rotate: a.rotate != null ? a.rotate : (ov.rotate || 0),
+      opacity: a.opacity != null ? a.opacity : (ov.opacity != null ? ov.opacity : 1),
+      bg: bgOf(ov)
+    };
+  }
   function syncOverlays() {
     const vt = virtualTime;
     overlays.forEach(ov => {
@@ -1129,7 +1146,8 @@
       // applies while paused AND keyframing, so the user can see/position the
       // overlay when placing keyframes without it being pinned on screen.
       const forceVisible = selected && !playing && ((ov.anims && Object.keys(ov.anims).length > 0) || ov.autoKey);
-      const active = vt >= ov.start && vt < ov.start + ov.duration;
+      const st = resolveOverlay(ov, vt);
+      const active = st.active;
       if (!active && !forceVisible) {
         const e = ovEls.get(ov.id);
         if (e) { if (e.video) e.video.pause(); if (e.audio) e.audio.pause(); e.el.style.display = 'none'; }
@@ -1137,12 +1155,11 @@
       }
       const entry = ensureOvEl(ov);
       const { el: elx, video, audio } = entry;
-      const a = (ov.anims && Object.keys(ov.anims).length) ? evalAnim(ov, vt - ov.start) : {};
       elx.style.display = (ov.type === 'text') ? 'inline-flex' : 'block';
-      elx.style.opacity = (a.opacity != null ? a.opacity : (ov.opacity != null ? ov.opacity : 1));
+      elx.style.opacity = st.opacity;
       // Size the bounding box precisely: text hugs its content; media uses its
       // aspect ratio so the hitbox matches what's actually shown.
-      const scale = a.scale != null ? a.scale : (ov.scale != null ? ov.scale : 1);
+      const scale = st.scale;
       if (ov.type === 'text') {
         elx.style.width = 'auto';
         elx.style.height = 'auto';
@@ -1154,10 +1171,9 @@
         elx.style.width = (wFrac * 100) + '%';
         elx.style.height = (hFrac * 100) + '%';
       }
-      elx.style.left = (a.x != null ? a.x : (ov.x != null ? ov.x : 0.5)) * 100 + '%';
-      elx.style.top = (a.y != null ? a.y : (ov.y != null ? ov.y : 0.5)) * 100 + '%';
-      const rot = a.rotate != null ? a.rotate : (ov.rotate || 0);
-      elx.style.transform = 'translate(-50%,-50%) rotate(' + rot + 'deg)';
+      elx.style.left = (st.x * 100) + '%';
+      elx.style.top = (st.y * 100) + '%';
+      elx.style.transform = 'translate(-50%,-50%) rotate(' + st.rotate + 'deg)';
       // Layer order: higher timeline row (lower track index) sits on top, like
       // layers in an editor, so overlaps are resolved consistently.
       elx.style.zIndex = String(100 - ov.track * 10);
@@ -1172,7 +1188,7 @@
       if (ov.type === 'text') {
         elx.textContent = ov.text || '';
         elx.style.color = ov.color || '#ffffff';
-        const b = bgOf(ov);
+        const b = st.bg;
         if (b.type === 'none') {
           elx.style.background = 'transparent';
         } else {
@@ -1893,10 +1909,15 @@
       }
 
       progressLabel.textContent = 'Joining clips…';
-      let finalName = 'output.mp4';
+      let baseName = 'base.mp4';
 
       if (segmentNames.length === 1) {
-        finalName = segmentNames[0];
+        baseName = segmentNames[0];
+        if (baseName !== 'base.mp4') {
+          try { ff.FS('unlink', 'base.mp4'); } catch (e) {}
+          ff.FS('rename', baseName, 'base.mp4');
+          baseName = 'base.mp4';
+        }
       } else {
         const listContent = segmentNames.map(n => `file '${n}'`).join('\n');
         ff.FS('writeFile', 'list.txt', new TextEncoder().encode(listContent));
@@ -1905,11 +1926,17 @@
         // streams, real or silent) above, so the join itself can always be
         // a plain stream copy — fast, and avoids re-encoding twice.
         concatArgs.push('-c', 'copy');
-        concatArgs.push(finalName);
+        concatArgs.push(baseName);
         await ff.run(...concatArgs);
       }
 
-      const data = ff.FS('readFile', finalName);
+      let outName = baseName;
+      if (overlays.length) {
+        progressLabel.textContent = 'Compositing overlays…';
+        outName = await compositeOverlays(ff, baseName, targetW, targetH, targetFps);
+      }
+
+      const data = ff.FS('readFile', outName);
       const blob = new Blob([data.buffer], { type: 'video/mp4' });
       const url = URL.createObjectURL(blob);
       const filename = `kerf-export-${randomSuffix(8)}.mp4`;
@@ -1927,6 +1954,178 @@
       if (statusPill.classList.contains('status-init')) setStatus('ready', 'Engine ready');
     }
   });
+
+  // ---------- overlay compositing (bake overlays into the exported video) ----------
+  function roundRectPath(ctx, x, y, w, h, r) {
+    r = Math.max(0, Math.min(r, w / 2, h / 2));
+    ctx.beginPath();
+    if (ctx.roundRect) { ctx.roundRect(x, y, w, h, r); return; }
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  // Draw every active overlay at virtual time `vt` onto a 2D context, mirroring
+  // the preview transform (normalize x/y to the canvas, scale/rotate/opacity,
+  // text background, image/video drawing). `s` converts preview px -> canvas px.
+  function drawOverlays(ctx, W, H, vt, s, media) {
+    const active = overlays.filter(o => vt >= o.start && vt < o.start + o.duration)
+                            .sort((a, b) => (b.track || 0) - (a.track || 0));
+    for (const ov of active) {
+      const st = resolveOverlay(ov, vt);
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, Math.min(1, st.opacity));
+      ctx.translate(st.x * W, st.y * H);
+      ctx.rotate(st.rotate * Math.PI / 180);
+      if (ov.type === 'text') {
+        const fontSize = (ov.fontSize || 32) * s;
+        ctx.font = '600 ' + fontSize + 'px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        const text = ov.text || '';
+        const padX = (st.bg.padX || 0) * s, padY = (st.bg.padY || 0) * s;
+        const tw = ctx.measureText(text).width, th = fontSize;
+        if (st.bg.type !== 'none') {
+          ctx.fillStyle = hexToRgba(st.bg.color || '#000000', st.bg.opacity != null ? st.bg.opacity : 1);
+          const r = (st.bg.type === 'bubble') ? (th + padY * 2) / 2 : (st.bg.radius || 0) * s;
+          roundRectPath(ctx, -tw / 2 - padX, -th / 2 - padY, tw + padX * 2, th + padY * 2, r);
+          ctx.fill();
+        }
+        ctx.fillStyle = ov.color || '#ffffff';
+        ctx.fillText(text, 0, 0);
+      } else if (ov.type === 'image') {
+        const img = media[ov.id];
+        if (img && img.complete && img.naturalWidth) {
+          const ar = ov.ar || (img.naturalWidth / Math.max(1, img.naturalHeight)) || 1;
+          let wFrac = 0.6 * st.scale, hFrac = wFrac / ar;
+          if (hFrac > 0.95) { hFrac = 0.95; wFrac = hFrac * ar; }
+          if (wFrac > 0.95) { wFrac = 0.95; hFrac = wFrac / ar; }
+          const w = wFrac * W, h = hFrac * H;
+          ctx.drawImage(img, -w / 2, -h / 2, w, h);
+        }
+      } else if (ov.type === 'video') {
+        const v = media[ov.id];
+        if (v && v.readyState >= 2) {
+          const ar = ov.ar || (v.videoWidth / Math.max(1, v.videoHeight)) || 16 / 9;
+          let wFrac = 0.6 * st.scale, hFrac = wFrac / ar;
+          if (hFrac > 0.95) { hFrac = 0.95; wFrac = hFrac * ar; }
+          if (wFrac > 0.95) { wFrac = 0.95; hFrac = wFrac / ar; }
+          const w = wFrac * W, h = hFrac * H;
+          const local = vt - ov.start;
+          try { if (v.duration && Math.abs(v.currentTime - local) > 0.1) v.currentTime = Math.max(0, Math.min(local, v.duration)); } catch (e) {}
+          try { ctx.drawImage(v, -w / 2, -h / 2, w, h); } catch (e) {}
+        }
+      }
+      ctx.restore();
+    }
+  }
+
+  // Mix base audio with overlay audio (audio overlays + non-muted video overlays),
+  // each delayed to its timeline start. Returns an audio filename, or throws so
+  // the caller can fall back to the base audio only.
+  async function buildMixedAudio(ff, baseName) {
+    await ff.run('-i', baseName, '-vn', '-c:a', 'aac', '-b:a', '192k', 'base.aac');
+    const items = [];
+    overlays.forEach((ov) => {
+      if (ov.type === 'audio' && ov.url) items.push({ src: ov.url, vol: ov.volume != null ? ov.volume : 1, start: ov.start, dur: ov.duration });
+      else if (ov.type === 'video' && ov.url && !ov.muted) items.push({ src: ov.url, vol: 1, start: ov.start, dur: ov.duration });
+    });
+    if (!items.length) return 'base.aac';
+    const inputs = ['-i', 'base.aac'];
+    const parts = ['[0:a]aresample=44100[a0]'];
+    for (let k = 0; k < items.length; k++) {
+      const it = items[k];
+      const fn = 'ova' + k + '.dat';
+      const buf = await fetchFile(it.src);
+      ff.FS('writeFile', fn, buf);
+      inputs.push('-t', (it.dur || 1).toFixed(3), '-i', fn);
+      const delay = Math.max(0, it.start).toFixed(3);
+      parts.push('[' + (k + 1) + ':a]adelay=delays=' + delay + 'S:all=1[d' + k + '];[d' + k + ']volume=' + (it.vol != null ? it.vol : 1) + '[v' + k + ']');
+      parts.push('[v' + k + ']aresample=44100[a' + (k + 1) + ']');
+    }
+    let amix = parts.join(';') + ';';
+    const al = [];
+    for (let k = 0; k <= items.length; k++) al.push('[a' + k + ']');
+    amix += al.join('') + 'amix=inputs=' + (items.length + 1) + ':normalize=0[aout]';
+    await ff.run(...inputs, '-filter_complex', amix, '-map', '[aout]', '-c:a', 'aac', '-b:a', '192k', 'mix.aac');
+    return 'mix.aac';
+  }
+
+  // Build the base joined video (baseName), composite overlays frame-by-frame
+  // onto a canvas (matched to the preview via resolveOverlay), capture with
+  // MediaRecorder, then mux with the mixed audio via ffmpeg.
+  async function compositeOverlays(ff, baseName, W, H, fps) {
+    const total = totalDuration();
+    const s = H / Math.max(1, (previewFrame && previewFrame.clientHeight) || H);
+    const baseData = ff.FS('readFile', baseName);
+    const baseUrl = URL.createObjectURL(new Blob([baseData.buffer], { type: 'video/mp4' }));
+    const baseVid = document.createElement('video');
+    baseVid.src = baseUrl; baseVid.muted = true; baseVid.playsInline = true;
+    await new Promise((res, rej) => { baseVid.onloadedmetadata = res; baseVid.onerror = rej; });
+    await baseVid.play().catch(() => {});
+
+    const media = {};
+    const preloads = [];
+    overlays.forEach(ov => {
+      if (ov.type === 'image' && ov.url) {
+        const img = new Image(); img.src = ov.url; media[ov.id] = img;
+        preloads.push(new Promise(r => { img.onload = r; img.onerror = r; }));
+      } else if (ov.type === 'video' && ov.url) {
+        const v = document.createElement('video'); v.src = ov.url; v.muted = true; v.playsInline = true; v.preload = 'auto';
+        media[ov.id] = v;
+        preloads.push(new Promise(r => { v.onloadedmetadata = r; v.onerror = r; }));
+      }
+    });
+    await Promise.all(preloads);
+
+    const canvas = document.createElement('canvas'); canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext('2d');
+    const stream = canvas.captureStream(fps);
+    const mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9') ? 'video/webm;codecs=vp9'
+               : MediaRecorder.isTypeSupported('video/webm;codecs=vp8') ? 'video/webm;codecs=vp8'
+               : 'video/webm';
+    const rec = new MediaRecorder(stream, { mimeType: mime });
+    const chunks = [];
+    rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+    const recDone = new Promise(res => { rec.onstop = res; });
+    rec.start();
+
+    await new Promise((resolve) => {
+      let stopped = false;
+      const finish = () => { if (!stopped) { stopped = true; try { rec.stop(); } catch (e) {} resolve(); } };
+      baseVid.onended = finish;
+      const tick = () => {
+        const vt = baseVid.currentTime;
+        if (baseVid.ended || vt >= total) { finish(); return; }
+        try {
+          ctx.drawImage(baseVid, 0, 0, W, H);
+          drawOverlays(ctx, W, H, vt, s, media);
+        } catch (e) {}
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
+    await recDone;
+    const vidFile = await fetchFile(new Blob(chunks, { type: rec.mimeType || 'video/webm' }));
+    ff.FS('writeFile', 'rec.webm', vidFile);
+
+    let audioName = null;
+    try { audioName = await buildMixedAudio(ff, baseName); } catch (e) { console.warn('overlay audio mix failed', e); audioName = null; }
+
+    const outName = 'output.mp4';
+    const muxArgs = ['-i', 'rec.webm'];
+    if (audioName) {
+      muxArgs.push('-i', audioName, '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-map', '0:v:0', '-map', '1:a:0', '-c:a', 'aac', '-shortest', outName);
+    } else {
+      muxArgs.push('-i', baseName, '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-map', '0:v:0', '-map', '1:a:0?', '-c:a', 'copy', '-shortest', outName);
+    }
+    await ff.run(...muxArgs);
+    ['rec.webm', 'base.aac', 'mix.aac', 'ova0.dat', 'ova1.dat', 'ova2.dat', 'ova3.dat', 'ova4.dat'].forEach(n => { try { ff.FS('unlink', n); } catch (e) {} });
+    return outName;
+  }
 
   downloadLink.addEventListener('click', () => {
     setTimeout(() => resultWrap.classList.remove('active'), 3000);

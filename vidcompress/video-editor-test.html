@@ -496,6 +496,10 @@
           <h3>Overlay settings</h3>
           <div id="overlayInspector"><div class="none">Click an overlay on the timeline</div></div>
         </div>
+        <div class="panel clip-inspector" id="clipLeftPanel" style="display:none;">
+          <h3>Selected clip</h3>
+          <div id="clipLeftBody"><div class="none">Click a clip on the timeline</div></div>
+        </div>
       </div>
 
       <div class="preview-col">
@@ -828,7 +832,8 @@
       block.style.left = (cursor * pxPerSec) + 'px';
       block.style.width = Math.max(w, 4) + 'px';
       block.dataset.id = clip.id;
-      block.draggable = true;
+      block.draggable = false;
+      block.addEventListener('dragstart', (e) => e.preventDefault());
 
       const thumbsWrap = document.createElement('div');
       thumbsWrap.className = 'thumbs';
@@ -1250,6 +1255,7 @@
     html += '<div class="ov-hint">Turn on Auto-key, then drag the overlay in the preview or change a value while the playhead is inside it to record motion. Click a diamond on the timeline to seek; right-click to delete.</div>';
     html += '<button class="btn btn-danger ov-del" data-del="1">Delete overlay</button>';
     overlayInspector.innerHTML = html;
+    refreshLeftClipPanel(clips.find(c => c.id === selectedId));
   }
 
   // Delegated edits from the inspector.
@@ -1581,10 +1587,8 @@
     renderTimeline();
   }
 
-  function updateInspector() {
-    const clip = clips.find(c => c.id === selectedId);
-    if (!clip) { inspectorBody.innerHTML = '<div class="none">Click a clip on the timeline</div>'; return; }
-    inspectorBody.innerHTML = `
+  function clipInspectorHtml(clip) {
+    return `
       <div class="row"><span>File</span><b title="${escapeHtml(clip.name)}">${escapeHtml(clip.name.length > 18 ? clip.name.slice(0,16)+'…' : clip.name)}</b></div>
       <div class="row"><span>In</span><b>${clip.inPoint.toFixed(2)}s</b></div>
       <div class="row"><span>Out</span><b>${clip.outPoint.toFixed(2)}s</b></div>
@@ -1592,6 +1596,49 @@
       <div class="row"><span>Source dur.</span><b>${clip.duration.toFixed(2)}s</b></div>
       <div class="row"><span>Audio</span><b>${clip.waveform === false ? 'none' : (clip.muted ? 'muted' : 'audible')}</b></div>
     `;
+  }
+  function clipSettingsHtml(clip) {
+    return `
+      <div class="row"><span>File</span><b title="${escapeHtml(clip.name)}">${escapeHtml(clip.name.length > 22 ? clip.name.slice(0,20)+'…' : clip.name)}</b></div>
+      <div class="ov-field row2">
+        <div style="flex:1"><label>In (s)</label><input type="number" step="0.1" min="0" data-clip="inPoint" value="${clip.inPoint.toFixed(2)}"></div>
+        <div style="flex:1"><label>Out (s)</label><input type="number" step="0.1" min="0" data-clip="outPoint" value="${clip.outPoint.toFixed(2)}"></div>
+      </div>
+      <div class="row"><span>Length</span><b>${clipDur(clip).toFixed(2)}s</b></div>
+      <div class="ov-field row2">
+        <label style="flex:1">Mute audio</label>
+        <label class="switch"><input type="checkbox" data-clip="muted"${clip.muted ? ' checked' : ''}><span class="slider"></span></label>
+      </div>
+    `;
+  }
+  function refreshLeftClipPanel(clip) {
+    const panel = el('clipLeftPanel'); if (!panel) return;
+    const body = el('clipLeftBody');
+    if (!clip) { panel.style.display = 'none'; return; }
+    panel.style.display = '';
+    body.innerHTML = clipSettingsHtml(clip);
+  }
+  function updateInspector() {
+    const clip = clips.find(c => c.id === selectedId);
+    inspectorBody.innerHTML = clip ? clipInspectorHtml(clip) : '<div class="none">Click a clip on the timeline</div>';
+    refreshLeftClipPanel(clip);
+  }
+  const clipLeftBodyEl = el('clipLeftBody');
+  if (clipLeftBodyEl) {
+    clipLeftBodyEl.addEventListener('input', onClipField);
+    clipLeftBodyEl.addEventListener('change', onClipField);
+  }
+  function onClipField(e) {
+    const prop = e.target.dataset.clip; if (!prop) return;
+    const clip = clips.find(c => c.id === selectedId); if (!clip) return;
+    if (prop === 'muted') { clip.muted = e.target.checked; }
+    else {
+      let v = parseFloat(e.target.value); if (isNaN(v)) return;
+      if (prop === 'inPoint') clip.inPoint = Math.max(0, Math.min(v, clip.outPoint - 0.05));
+      else if (prop === 'outPoint') clip.outPoint = Math.max(clip.inPoint + 0.05, Math.min(v, clip.duration));
+    }
+    renderTimeline(); updatePreviewSource(); updateInspector();
+    if (e.type === 'change') refreshLeftClipPanel(clip);
   }
 
   // ---------- tools toolbar ----------

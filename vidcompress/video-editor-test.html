@@ -423,6 +423,10 @@
     background:rgba(255,255,255,0.6); opacity:0; transition:opacity .12s; border-radius:2px;
   }
   .ov-block:hover .handle::before, .ov-block.selected .handle::before{ opacity:0.9; }
+  .ov-block .kf-diamond{ position:absolute; top:3px; width:9px; height:9px; margin-left:-4.5px; background:var(--accent-2); transform:rotate(45deg); border:1px solid #062521; cursor:pointer; z-index:3; }
+  .ov-block .kf-diamond:hover{ background:#fff; }
+  .ov-sep{ margin:14px 0 6px; font-size:10px; text-transform:uppercase; letter-spacing:0.08em; color:var(--accent); border-top:1px solid var(--line); padding-top:10px; }
+  .ov-hint{ font-size:11px; color:var(--text-faint); line-height:1.5; margin-top:6px; }
 
   .preview-frame #overlayLayer{ position:absolute; inset:0; pointer-events:none; overflow:hidden; z-index:5; }
   /* Prevent the browser's native image/video dragging (ghost drag-to-desktop). */
@@ -925,7 +929,9 @@
       id: uid(), type, track: pickTrack(start, duration), start, duration,
       name: OV_TYPE_LABEL[type] || type,
       x: 0.5, y: 0.5, scale: 1, opacity: 1, muted: false, volume: 1,
-      rotate: 0, inPoint: 0, outPoint: duration
+      rotate: 0, inPoint: 0, outPoint: duration,
+      anims: {}, autoKey: false,
+      bg: { type: 'none', color: '#000000', opacity: 0.5, radius: 999, padX: 12, padY: 12 }
     }, props);
     overlays.push(ov);
     selectOverlay(ov.id);
@@ -969,6 +975,17 @@
           '<div class="handle left" data-edge="start"></div>' +
           '<div class="handle right" data-edge="end"></div>';
         trackEl.appendChild(block);
+        const anims = ov.anims || {};
+        const kfTimes = [];
+        for (const p of KF_PROPS) (anims[p] || []).forEach(k => kfTimes.push(k.t));
+        [...new Set(kfTimes)].sort((a, b) => a - b).forEach(t => {
+          const d = document.createElement('span');
+          d.className = 'kf-diamond';
+          d.style.left = (t * pxPerSec) + 'px';
+          d.dataset.kft = t;
+          d.dataset.id = ov.id;
+          block.appendChild(d);
+        });
       });
     });
   }
@@ -1038,6 +1055,66 @@
     e.target.setPointerCapture(e.pointerId);
   }
 
+  // ---------- animation helpers ----------
+  const KF_PROPS = ['x', 'y', 'scale', 'rotate', 'opacity'];
+  const EASING = {
+    linear: t => t,
+    easeIn: t => t * t,
+    easeOut: t => 1 - (1 - t) * (1 - t),
+    easeInOut: t => t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2
+  };
+  function bgOf(ov) {
+    return ov && ov.bg ? ov.bg : { type: 'none', color: '#000000', opacity: 0.5, radius: 999, padX: 12, padY: 12 };
+  }
+  function hexToRgba(hex, a) {
+    const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex || '#000000');
+    if (!m) return 'rgba(0,0,0,' + a + ')';
+    const r = parseInt(m[1], 16), g = parseInt(m[2], 16), b = parseInt(m[3], 16);
+    return 'rgba(' + r + ',' + g + ',' + b + ',' + a + ')';
+  }
+  function shortestAngle(d) { d %= 360; if (d > 180) d -= 360; if (d < -180) d += 360; return d; }
+  function evalAnim(ov, localT) {
+    const out = {};
+    const anims = ov.anims || {};
+    for (const p of KF_PROPS) {
+      const kf = anims[p];
+      if (!kf || !kf.length) continue;
+      if (localT <= kf[0].t) { out[p] = kf[0].v; continue; }
+      const last = kf[kf.length - 1];
+      if (localT >= last.t) { out[p] = last.v; continue; }
+      let i = 0; while (i < kf.length - 1 && kf[i + 1].t <= localT) i++;
+      const k0 = kf[i], k1 = kf[i + 1];
+      const span = (k1.t - k0.t) || 1;
+      const lin = (localT - k0.t) / span;
+      const ease = EASING[(k1.e || k0.e || 'linear')] || EASING.linear;
+      let a = k0.v, b = k1.v;
+      if (p === 'rotate') b = a + shortestAngle(b - a);
+      let v = a + (b - a) * ease(lin);
+      if (p === 'opacity') v = Math.max(0, Math.min(1, v));
+      out[p] = v;
+    }
+    return out;
+  }
+  function upsertKeyframe(ov, prop, t, v) {
+    ov.anims = ov.anims || {};
+    const arr = ov.anims[prop] || (ov.anims[prop] = []);
+    const i = arr.findIndex(k => Math.abs(k.t - t) < 0.05);
+    if (i >= 0) arr[i].v = v; else { arr.push({ t, v, e: 'linear' }); arr.sort((a, b) => a.t - b.t); }
+  }
+  function addKeyframeAtPlayhead(id) {
+    const ov = overlays.find(o => o.id === id);
+    if (!ov) return;
+    const t = Math.max(0, Math.min(ov.duration, virtualTime - ov.start));
+    for (const p of KF_PROPS) {
+      const base = p === 'x' ? (ov.x != null ? ov.x : 0.5)
+        : p === 'y' ? (ov.y != null ? ov.y : 0.5)
+        : p === 'scale' ? (ov.scale != null ? ov.scale : 1)
+        : p === 'rotate' ? (ov.rotate || 0)
+        : (ov.opacity != null ? ov.opacity : 1);
+      upsertKeyframe(ov, p, t, base);
+    }
+    renderTimeline(); syncOverlays(); updateOverlayInspector();
+  }
   function syncOverlays() {
     const vt = virtualTime;
     overlays.forEach(ov => {
@@ -1049,11 +1126,12 @@
       }
       const entry = ensureOvEl(ov);
       const { el: elx, video, audio } = entry;
+      const a = (ov.anims && Object.keys(ov.anims).length) ? evalAnim(ov, vt - ov.start) : {};
       elx.style.display = (ov.type === 'text') ? 'inline-flex' : 'block';
-      elx.style.opacity = (ov.opacity != null ? ov.opacity : 1);
+      elx.style.opacity = (a.opacity != null ? a.opacity : (ov.opacity != null ? ov.opacity : 1));
       // Size the bounding box precisely: text hugs its content; media uses its
       // aspect ratio so the hitbox matches what's actually shown.
-      const scale = ov.scale != null ? ov.scale : 1;
+      const scale = a.scale != null ? a.scale : (ov.scale != null ? ov.scale : 1);
       if (ov.type === 'text') {
         elx.style.width = 'auto';
         elx.style.height = 'auto';
@@ -1065,9 +1143,9 @@
         elx.style.width = (wFrac * 100) + '%';
         elx.style.height = (hFrac * 100) + '%';
       }
-      elx.style.left = (ov.x != null ? ov.x : 0.5) * 100 + '%';
-      elx.style.top = (ov.y != null ? ov.y : 0.5) * 100 + '%';
-      const rot = ov.rotate || 0;
+      elx.style.left = (a.x != null ? a.x : (ov.x != null ? ov.x : 0.5)) * 100 + '%';
+      elx.style.top = (a.y != null ? a.y : (ov.y != null ? ov.y : 0.5)) * 100 + '%';
+      const rot = a.rotate != null ? a.rotate : (ov.rotate || 0);
       elx.style.transform = 'translate(-50%,-50%) rotate(' + rot + 'deg)';
       // Layer order: higher timeline row (lower track index) sits on top, like
       // layers in an editor, so overlaps are resolved consistently.
@@ -1084,7 +1162,14 @@
       if (ov.type === 'text') {
         elx.textContent = ov.text || '';
         elx.style.color = ov.color || '#ffffff';
-        elx.style.background = ov.background || 'transparent';
+        const b = bgOf(ov);
+        if (b.type === 'none') {
+          elx.style.background = 'transparent';
+        } else {
+          elx.style.background = hexToRgba(b.color || '#000000', b.opacity != null ? b.opacity : 1);
+          elx.style.borderRadius = (b.type === 'bubble' ? 999 : (b.radius != null ? b.radius : 0)) + 'px';
+          elx.style.padding = (b.padX != null ? b.padX : 0) + 'px';
+        }
         elx.style.fontSize = (ov.fontSize || 32) + 'px';
         elx.style.fontWeight = '600';
       } else if (ov.type === 'video' && video) {
@@ -1127,8 +1212,16 @@
 
     if (ov.type === 'text') {
       html += '<div class="ov-field"><label>Text</label><textarea data-prop="text">' + escapeHtml(ov.text || '') + '</textarea></div>';
-      html += '<div class="ov-field row2"><div style="flex:1"><label>Color</label><input type="color" data-prop="color" value="' + (ov.color || '#ffffff') + '"></div>';
-      html += '<div style="flex:1"><label>BG</label><input type="color" data-prop="background" value="' + (ov.background || '#000000') + '"></div></div>';
+      html += '<div class="ov-field"><label>Color</label><input type="color" data-prop="color" value="' + (ov.color || '#ffffff') + '"></div>';
+      const b = bgOf(ov);
+      html += '<div class="ov-field"><label>Background</label><select data-prop="bg.type">' +
+        ['none','solid','bubble'].map(s => '<option value="' + s + '"' + (b.type === s ? ' selected' : '') + '>' + (s === 'none' ? 'None' : (s === 'solid' ? 'Solid' : 'Bubble')) + '</option>').join('') + '</select></div>';
+      if (b.type !== 'none') {
+        html += '<div class="ov-field row2"><div style="flex:1"><label>BG color</label><input type="color" data-prop="bg.color" value="' + (b.color || '#000000') + '"></div>';
+        html += '<div style="flex:1"><label>BG opacity</label><input type="range" min="0" max="1" step="0.01" data-prop="bg.opacity" value="' + (b.opacity != null ? b.opacity : 0.5) + '"></div></div>';
+        html += '<div class="ov-field row2"><div style="flex:1"><label>Radius (px)</label><input type="number" step="1" data-prop="bg.radius" value="' + (b.radius != null ? b.radius : 0) + '"></div>';
+        html += '<div style="flex:1"><label>Padding (px)</label><input type="number" step="1" data-prop="bg.padX" value="' + (b.padX != null ? b.padX : 8) + '"></div></div>';
+      }
       html += '<div class="ov-field"><label>Font size (px)</label>' + num('fontSize') + '</div>';
     }
     if (ov.type === 'text' || ov.type === 'image' || ov.type === 'video') {
@@ -1145,6 +1238,11 @@
       html += '<div class="ov-field row2"><div style="flex:1"><label>In (s)</label>' + num('inPoint') + '</div><div style="flex:1"><label>Out (s)</label>' + num('outPoint') + '</div></div>';
     }
     html += '<div class="ov-field"><label>Opacity (0–1)</label>' + num('opacity') + '</div>';
+    const kfCount = KF_PROPS.reduce((n, p) => n + ((ov.anims && ov.anims[p]) ? ov.anims[p].length : 0), 0);
+    html += '<div class="ov-sep">Animation</div>';
+    html += '<div class="ov-field row2"><label style="flex:1">Auto-key</label><label class="switch"><input type="checkbox" data-prop="autoKey"' + (ov.autoKey ? ' checked' : '') + '><span class="slider"></span></label></div>';
+    html += '<div class="ov-field"><button class="btn btn-ghost" data-addkf="1">＋ Keyframe at playhead (' + kfCount + ')</button></div>';
+    html += '<div class="ov-hint">Turn on Auto-key, then drag the overlay in the preview or change a value while the playhead is inside it to record motion. Click a diamond on the timeline to seek; right-click to delete.</div>';
     html += '<button class="btn btn-danger ov-del" data-del="1">Delete overlay</button>';
     overlayInspector.innerHTML = html;
   }
@@ -1155,9 +1253,20 @@
     if (!ov) return;
     const prop = e.target.dataset.prop;
     if (!prop) return;
-    if (e.target.type === 'checkbox') ov[prop] = e.target.checked;
-    else if (e.target.type === 'number') ov[prop] = parseFloat(e.target.value) || 0;
-    else ov[prop] = e.target.value;
+    let target = ov;
+    const parts = prop.split('.');
+    for (let i = 0; i < parts.length - 1; i++) {
+      if (typeof target[parts[i]] !== 'object' || target[parts[i]] == null) target[parts[i]] = {};
+      target = target[parts[i]];
+    }
+    const leaf = parts[parts.length - 1];
+    let val;
+    if (e.target.type === 'checkbox') val = e.target.checked;
+    else if (e.target.type === 'number' || e.target.type === 'range') {
+      val = parseFloat(e.target.value);
+      if (isNaN(val)) val = 0;
+    } else val = e.target.value;
+    target[leaf] = val;
     if (prop === 'track') ov.track = parseInt(e.target.value, 10);
     if (prop === 'start' && ov.start < 0) ov.start = 0;
     renderTimeline();
@@ -1167,13 +1276,14 @@
   overlayInspector.addEventListener('change', onOverlayField);
   overlayInspector.addEventListener('click', (e) => {
     if (e.target.dataset.del) deleteOverlay(selectedOverlayId);
+    else if (e.target.dataset.addkf) addKeyframeAtPlayhead(selectedOverlayId);
   });
 
   // Toolbar: add overlays at the current playhead.
   el('addTextBtn').addEventListener('click', () => {
     const text = prompt('Overlay text:', 'Your text here');
     if (text == null) return;
-    addOverlay('text', { text, color: '#ffffff', background: 'transparent', fontSize: 32 });
+    addOverlay('text', { text, color: '#ffffff', fontSize: 32, bg: { type: 'none', color: '#000000', opacity: 0.5, radius: 999, padX: 14, padY: 14 } });
   });
   el('addImageBtn').addEventListener('click', () => ovImageInput.click());
   el('addVideoBtn').addEventListener('click', () => ovVideoInput.click());
@@ -1217,6 +1327,7 @@
   overlayTracks.addEventListener('pointerdown', (e) => {
     const block = e.target.closest('.ov-block');
     if (!block) return;
+    if (e.target.closest('.kf-diamond')) return;
     const id = block.dataset.id;
     const ov = overlays.find(o => o.id === id);
     if (!ov) return;
@@ -1231,6 +1342,26 @@
     }
     overlayTracks.setPointerCapture(e.pointerId);
     e.stopPropagation();
+  });
+  overlayTracks.addEventListener('click', (e) => {
+    const d = e.target.closest('.kf-diamond');
+    if (!d) return;
+    const ov = overlays.find(o => o.id === d.dataset.id);
+    if (ov) seekTo(ov.start + parseFloat(d.dataset.kft));
+  });
+  overlayTracks.addEventListener('contextmenu', (e) => {
+    const d = e.target.closest('.kf-diamond');
+    if (!d) return;
+    e.preventDefault();
+    const ov = overlays.find(o => o.id === d.dataset.id);
+    if (!ov) return;
+    const t = parseFloat(d.dataset.kft);
+    for (const p of KF_PROPS) {
+      if (!ov.anims || !ov.anims[p]) continue;
+      ov.anims[p] = ov.anims[p].filter(k => Math.abs(k.t - t) >= 0.05);
+      if (!ov.anims[p].length) delete ov.anims[p];
+    }
+    renderTimeline(); syncOverlays(); updateOverlayInspector();
   });
 
   function escapeHtml(s){ return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -1324,12 +1455,15 @@
         if (ovPreviewCtx.type === 'move') {
           ov.x = Math.min(1, Math.max(0, ovPreviewCtx.startX + (e.clientX - ovPreviewCtx.startClientX) / rect.width));
           ov.y = Math.min(1, Math.max(0, ovPreviewCtx.startY + (e.clientY - ovPreviewCtx.startClientY) / rect.height));
+          if (ov.autoKey) { const lt = virtualTime - ov.start; upsertKeyframe(ov, 'x', lt, ov.x); upsertKeyframe(ov, 'y', lt, ov.y); }
         } else if (ovPreviewCtx.type === 'resize') {
           const d = Math.hypot(e.clientX - ovPreviewCtx.cx, e.clientY - ovPreviewCtx.cy);
           ov.scale = Math.min(5, Math.max(0.05, ovPreviewCtx.startScale * (d / ovPreviewCtx.startDist)));
+          if (ov.autoKey) upsertKeyframe(ov, 'scale', virtualTime - ov.start, ov.scale);
         } else if (ovPreviewCtx.type === 'rotate') {
           const a = Math.atan2(e.clientY - ovPreviewCtx.cy, e.clientX - ovPreviewCtx.cx);
           ov.rotate = ovPreviewCtx.startRotate + (a - ovPreviewCtx.startAngle) * 180 / Math.PI;
+          if (ov.autoKey) upsertKeyframe(ov, 'rotate', virtualTime - ov.start, ov.rotate);
         }
         updateOverlayInspector();
         syncOverlays();

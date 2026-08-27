@@ -184,6 +184,9 @@
   .transport input[type=range]::-webkit-slider-thumb{
     -webkit-appearance:none; width:12px; height:12px; border-radius:50%; background:var(--accent); cursor:pointer;
   }
+  .transport .seekbar{ width:auto; flex:1; min-width:80px; height:5px; border-radius:3px; cursor:pointer; }
+  .transport .seekbar::-webkit-slider-thumb{ width:14px; height:14px; }
+  .transport .seekbar::-moz-range-thumb{ width:14px; height:14px; border:none; }
 
   .side-col{
     width:290px; flex-shrink:0; margin-left:20px; min-height:0;
@@ -422,12 +425,20 @@
   .ov-block:hover .handle::before, .ov-block.selected .handle::before{ opacity:0.9; }
 
   .preview-frame #overlayLayer{ position:absolute; inset:0; pointer-events:none; overflow:hidden; z-index:5; }
+  /* Prevent the browser's native image/video dragging (ghost drag-to-desktop). */
+  #overlayLayer img, #overlayLayer video{ -webkit-user-drag:none; user-drag:none; -webkit-user-select:none; user-select:none; pointer-events:none; }
   #overlayLayer .ov-el{ position:absolute; pointer-events:none; }
-  #overlayLayer .ov-el.selected{ outline:1px dashed rgba(255,159,69,0.9); outline-offset:2px; }
-  #overlayLayer .ov-handle{ position:absolute; width:16px; height:16px; border-radius:50%; background:var(--accent); border:2px solid #1a0f04; z-index:10; display:none; align-items:center; justify-content:center; font-size:10px; color:#1a0f04; }
-  #overlayLayer .ov-resize-handle{ right:2px; bottom:2px; cursor:nwse-resize; }
-  #overlayLayer .ov-rotate-handle{ left:50%; top:2px; transform:translateX(-50%); cursor:grab; }
-  #overlayLayer .ov-text{ font-family:'Inter',sans-serif; display:flex; align-items:center; justify-content:center; text-align:center; padding:4px 8px; border-radius:6px; }
+  #overlayLayer .ov-el.selected{ outline:1px solid rgba(255,159,69,0.95); outline-offset:1px; }
+  #overlayLayer .ov-text{ font-family:'Inter',sans-serif; display:inline-flex; align-items:center; justify-content:center; text-align:center; padding:2px 4px; border-radius:4px; white-space:pre-wrap; max-width:90%; }
+
+  /* Photoshop-style bounding-box handles */
+  #overlayLayer .ov-handle{ position:absolute; width:11px; height:11px; background:#fff; border:1px solid #1a0f04; box-sizing:border-box; z-index:10; display:none; }
+  #overlayLayer .ov-handle.tl{ left:0; top:0; transform:translate(-50%,-50%); cursor:nwse-resize; }
+  #overlayLayer .ov-handle.tr{ right:0; top:0; transform:translate(50%,-50%); cursor:nesw-resize; }
+  #overlayLayer .ov-handle.bl{ left:0; bottom:0; transform:translate(-50%,50%); cursor:nesw-resize; }
+  #overlayLayer .ov-handle.br{ right:0; bottom:0; transform:translate(50%,50%); cursor:nwse-resize; }
+  #overlayLayer .ov-rotate-line{ position:absolute; left:50%; top:-22px; width:1px; height:22px; background:var(--accent); display:none; transform:translateX(-50%); pointer-events:none; }
+  #overlayLayer .ov-rotate-handle{ position:absolute; left:50%; top:-30px; transform:translateX(-50%); width:15px; height:15px; border-radius:50%; background:var(--accent); border:2px solid #1a0f04; z-index:11; display:none; align-items:center; justify-content:center; font-size:9px; color:#1a0f04; cursor:grab; }
   #overlayLayer .ov-image, #overlayLayer .ov-video{ width:100%; height:100%; object-fit:contain; }
 
   .overlay-inspector .none{ color:var(--text-faint); font-size:12.5px; text-align:center; padding:10px 0; }
@@ -497,6 +508,7 @@
             <svg id="muteIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5L6 9H3v6h3l5 4V5z"/><path d="M15.5 8.5a5 5 0 010 7"/><path d="M18.5 5.5a9 9 0 010 13"/></svg>
           </button>
           <div class="tc"><span class="now" id="tcNow">00:00.0</span> / <span id="tcTotal">00:00.0</span></div>
+          <input type="range" class="seekbar" id="seekBar" min="0" max="100" step="0.01" value="0" title="Seek">
           <div class="zoom">
             zoom
             <input type="range" id="zoomRange" min="20" max="260" value="80">
@@ -614,6 +626,7 @@
   const overlayTracks = el('overlayTracks'), overlayLayer = el('overlayLayer');
   const previewVideo = el('previewVideo'), previewEmpty = el('previewEmpty');
   const previewFrame = previewVideo.parentElement;
+  const seekBar = el('seekBar');
   const playBtn = el('playBtn'), playIcon = el('playIcon');
   const muteBtn = el('muteBtn'), muteIcon = el('muteIcon');
   const tcNow = el('tcNow'), tcTotal = el('tcTotal');
@@ -965,17 +978,23 @@
     if (entry) return entry;
     const elx = document.createElement('div');
     elx.className = 'ov-el';
+    elx.draggable = false;
+    elx.addEventListener('dragstart', (e) => e.preventDefault());
     let video = null, audio = null;
     if (ov.type === 'text') {
       elx.classList.add('ov-text');
     } else if (ov.type === 'image') {
       const img = document.createElement('img');
       img.className = 'ov-image';
+      img.draggable = false;
       img.src = ov.url; elx.appendChild(img);
+      img.onload = () => { const ar = img.naturalWidth / Math.max(1, img.naturalHeight); if (!ov.ar && ar) { ov.ar = ar; syncOverlays(); } };
     } else if (ov.type === 'video') {
       video = document.createElement('video');
       video.className = 'ov-video'; video.src = ov.url; video.playsInline = true; video.preload = 'auto';
+      video.draggable = false; video.muted = false;
       elx.appendChild(video);
+      video.onloadedmetadata = () => { const ar = video.videoWidth / Math.max(1, video.videoHeight); if (!ov.ar && ar) { ov.ar = ar; syncOverlays(); } };
     } else if (ov.type === 'audio') {
       audio = document.createElement('audio');
       audio.src = ov.url; audio.preload = 'auto';
@@ -984,12 +1003,14 @@
       return ovEls.get(ov.id);
     }
     if (ov.type !== 'audio') {
+      const mk = (cls) => { const h = document.createElement('div'); h.className = 'ov-handle ' + cls; return h; };
+      const tl = mk('tl'), tr = mk('tr'), bl = mk('bl'), br = mk('br');
+      const rotLine = document.createElement('div'); rotLine.className = 'ov-rotate-line';
       const rotHandle = document.createElement('div'); rotHandle.className = 'ov-rotate-handle'; rotHandle.textContent = '⟳';
-      const resHandle = document.createElement('div'); resHandle.className = 'ov-resize-handle';
-      elx.appendChild(rotHandle); elx.appendChild(resHandle);
+      elx.append(rotLine, tl, tr, bl, br, rotHandle);
       elx.addEventListener('pointerdown', (e) => startOvPreview(e, ov.id, 'move'));
+      [tl, tr, bl, br].forEach(h => h.addEventListener('pointerdown', (e) => startOvPreview(e, ov.id, 'resize')));
       rotHandle.addEventListener('pointerdown', (e) => startOvPreview(e, ov.id, 'rotate'));
-      resHandle.addEventListener('pointerdown', (e) => startOvPreview(e, ov.id, 'resize'));
     }
     ovEls.set(ov.id, { el: elx, video, audio });
     overlayLayer.appendChild(elx);
@@ -1028,23 +1049,37 @@
       }
       const entry = ensureOvEl(ov);
       const { el: elx, video, audio } = entry;
-      elx.style.display = (ov.type === 'text') ? 'flex' : 'block';
+      elx.style.display = (ov.type === 'text') ? 'inline-flex' : 'block';
       elx.style.opacity = (ov.opacity != null ? ov.opacity : 1);
+      // Size the bounding box precisely: text hugs its content; media uses its
+      // aspect ratio so the hitbox matches what's actually shown.
       const scale = ov.scale != null ? ov.scale : 1;
-      const w = scale * 100, h = scale * 100;
-      elx.style.width = w + '%';
-      elx.style.height = h + '%';
+      if (ov.type === 'text') {
+        elx.style.width = 'auto';
+        elx.style.height = 'auto';
+      } else {
+        const ar = ov.ar || (16 / 9);
+        let wFrac = 0.6 * scale, hFrac = wFrac / ar;
+        if (hFrac > 0.95) { hFrac = 0.95; wFrac = hFrac * ar; }
+        if (wFrac > 0.95) { wFrac = 0.95; hFrac = wFrac / ar; }
+        elx.style.width = (wFrac * 100) + '%';
+        elx.style.height = (hFrac * 100) + '%';
+      }
       elx.style.left = (ov.x != null ? ov.x : 0.5) * 100 + '%';
       elx.style.top = (ov.y != null ? ov.y : 0.5) * 100 + '%';
       const rot = ov.rotate || 0;
       elx.style.transform = 'translate(-50%,-50%) rotate(' + rot + 'deg)';
+      // Layer order: higher timeline row (lower track index) sits on top, like
+      // layers in an editor, so overlaps are resolved consistently.
+      elx.style.zIndex = String(100 - ov.track * 10);
       const selected = ov.id === selectedOverlayId;
       elx.classList.toggle('selected', selected);
       elx.style.pointerEvents = (selected && ov.type !== 'audio') ? 'auto' : 'none';
+      elx.querySelectorAll('.ov-handle').forEach(h => h.style.display = selected ? 'block' : 'none');
       const rotHandle = elx.querySelector('.ov-rotate-handle');
-      const resHandle = elx.querySelector('.ov-resize-handle');
+      const rotLine = elx.querySelector('.ov-rotate-line');
       if (rotHandle) rotHandle.style.display = selected ? 'flex' : 'none';
-      if (resHandle) resHandle.style.display = selected ? 'block' : 'none';
+      if (rotLine) rotLine.style.display = selected ? 'block' : 'none';
 
       if (ov.type === 'text') {
         elx.textContent = ov.text || '';
@@ -1499,6 +1534,8 @@
   function updateClock() {
     tcNow.textContent = fmt(virtualTime);
     tcTotal.textContent = fmt(totalDuration());
+    const total = totalDuration() || 1;
+    if (seekBar) { seekBar.max = total; seekBar.value = virtualTime; }
   }
 
   function togglePlay() {
@@ -1525,6 +1562,11 @@
   // Click the preview itself to play/pause — common expectation, and the
   // gesture also satisfies the browser's autoplay policy for audio.
   previewVideo.addEventListener('click', togglePlay);
+
+  // Seek bar beneath the player: scrubbing it navigates the timeline and
+  // stops playback, matching the existing "manual playhead move stops play".
+  seekBar.addEventListener('pointerdown', () => stopPlayback());
+  seekBar.addEventListener('input', () => { seekTo(parseFloat(seekBar.value) || 0); });
 
   // Dedicated mute control for the preview (separate from export settings).
   muteBtn.addEventListener('click', () => {

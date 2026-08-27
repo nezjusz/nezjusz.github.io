@@ -372,6 +372,65 @@
     .clip-block .label{ font-size:10px; }
     .handle{ width:20px; }
   }
+
+  /* ---- overlays ---- */
+  .overlay-tools{ display:flex; align-items:center; gap:8px; }
+  .overlay-tools .ot-label{ font-size:11px; color:var(--text-faint); text-transform:uppercase; letter-spacing:0.08em; margin-right:2px; }
+
+  .overlay-tracks{ margin-top:6px; display:flex; flex-direction:column; gap:4px; }
+  .overlay-track{
+    position:relative; height:42px;
+    background:var(--panel);
+    border-radius:9px; border:1px solid var(--line);
+    touch-action:pan-x; overflow:hidden;
+  }
+  .overlay-track .lane-no{
+    position:absolute; left:6px; top:4px; font-size:9px; color:var(--text-faint);
+    font-family:'JetBrains Mono',monospace; z-index:1; pointer-events:none;
+  }
+  .ov-block{
+    position:absolute; top:6px; bottom:6px; border-radius:6px; overflow:hidden;
+    border:1.5px solid var(--line); cursor:grab; touch-action:none;
+    display:flex; align-items:center; padding:0 8px;
+    font-size:10.5px; font-weight:600; color:var(--text);
+    white-space:nowrap; text-overflow:ellipsis; user-select:none;
+    box-shadow:0 1px 4px rgba(0,0,0,0.4);
+  }
+  .ov-block.selected{ border-color:var(--accent); box-shadow:0 0 0 1px var(--accent), 0 4px 18px rgba(255,159,69,0.15); }
+  .ov-block.dragging{ opacity:0.6; cursor:grabbing; }
+  .ov-block .ov-icon{ margin-right:6px; opacity:0.85; flex-shrink:0; }
+  .ov-block.type-text{ background:linear-gradient(180deg,#3a2f6b,#2a2350); border-color:#5a4aa0; }
+  .ov-block.type-image{ background:linear-gradient(180deg,#2f5a4a,#234a3d); border-color:#3f8a6a; }
+  .ov-block.type-video{ background:linear-gradient(180deg,#5a3a2f,#4a2f25); border-color:#a06a4a; }
+  .ov-block.type-audio{ background:linear-gradient(180deg,#2f4a5a,#25414a); border-color:#4a8aa0; }
+  .ov-block .handle{ position:absolute; top:0; bottom:0; width:12px; z-index:3; cursor:ew-resize; }
+  .ov-block .handle.left{ left:0; } .ov-block .handle.right{ right:0; }
+  .ov-block .handle::before{
+    content:""; position:absolute; top:30%; bottom:30%; left:50%; width:2px; transform:translateX(-50%);
+    background:rgba(255,255,255,0.6); opacity:0; transition:opacity .12s; border-radius:2px;
+  }
+  .ov-block:hover .handle::before, .ov-block.selected .handle::before{ opacity:0.9; }
+
+  .preview-frame #overlayLayer{ position:absolute; inset:0; pointer-events:none; overflow:hidden; z-index:2; }
+  #overlayLayer .ov-el{ position:absolute; pointer-events:none; }
+  #overlayLayer .ov-text{ font-family:'Inter',sans-serif; display:flex; align-items:center; justify-content:center; text-align:center; padding:4px 8px; border-radius:6px; }
+  #overlayLayer .ov-image, #overlayLayer .ov-video{ width:100%; height:100%; object-fit:contain; }
+
+  .overlay-inspector .none{ color:var(--text-faint); font-size:12.5px; text-align:center; padding:10px 0; }
+  .ov-field{ display:flex; flex-direction:column; gap:4px; margin-bottom:10px; }
+  .ov-field label{ font-size:11px; color:var(--text-dim); }
+  .ov-field input[type=text], .ov-field textarea, .ov-field input[type=number]{
+    background:var(--panel-alt); border:1px solid var(--line); color:var(--text);
+    border-radius:6px; padding:7px 9px; font-size:12.5px; font-family:inherit; width:100%;
+  }
+  .ov-field textarea{ resize:vertical; min-height:48px; }
+  .ov-field input[type=color]{ width:38px; height:30px; padding:2px; background:var(--panel-alt); border:1px solid var(--line); border-radius:6px; }
+  .ov-field.row2{ flex-direction:row; align-items:center; gap:8px; }
+  .ov-del{ width:100%; margin-top:4px; }
+  @media (max-width: 640px){
+    .overlay-tools{ width:100%; order:2; flex-wrap:wrap; }
+    .overlay-tools .ot-label{ width:100%; }
+  }
 </style>
 </head>
 <body>
@@ -406,6 +465,7 @@
       <div class="preview-col">
         <div class="preview-frame">
           <video id="previewVideo" playsinline></video>
+          <div id="overlayLayer"></div>
           <div class="empty-hint" id="previewEmpty">Preview</div>
         </div>
         <div class="transport">
@@ -427,6 +487,11 @@
         <div class="panel clip-inspector">
           <h3>Selected clip</h3>
           <div id="inspectorBody"><div class="none">Click a clip on the timeline</div></div>
+        </div>
+
+        <div class="panel overlay-inspector">
+          <h3>Overlay</h3>
+          <div id="overlayInspector"><div class="none">Click an overlay on the timeline</div></div>
         </div>
 
         <div class="panel">
@@ -469,6 +534,13 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M9 7V4h6v3m-8 0l1 13h8l1-13"/></svg>
           Delete clip
         </button>
+        <div class="overlay-tools">
+          <span class="ot-label">Overlay</span>
+          <button class="tool-btn" id="addTextBtn" title="Add text overlay at playhead">Text</button>
+          <button class="tool-btn" id="addImageBtn" title="Add image overlay at playhead">Image</button>
+          <button class="tool-btn" id="addVideoBtn" title="Add video overlay at playhead">Video</button>
+          <button class="tool-btn" id="addAudioBtn" title="Add audio overlay at playhead">Audio</button>
+        </div>
         <div class="spacer"></div>
         <button class="add-more" id="addMoreBtn">+ Add clips</button>
       </div>
@@ -479,6 +551,12 @@
         </div>
         <div class="track-label">Audio</div>
         <div class="audio-wrap" id="audioWrap"></div>
+        <div class="track-label">Overlays</div>
+        <div class="overlay-tracks" id="overlayTracks">
+          <div class="overlay-track" data-track="0"><span class="lane-no">1</span></div>
+          <div class="overlay-track" data-track="1"><span class="lane-no">2</span></div>
+          <div class="overlay-track" data-track="2"><span class="lane-no">3</span></div>
+        </div>
       </div>
     </div>
   </div>
@@ -486,6 +564,9 @@
 </main>
 
 <input type="file" id="fileInput" accept="video/*" multiple>
+<input type="file" id="ovImageInput" accept="image/*">
+<input type="file" id="ovVideoInput" accept="video/*">
+<input type="file" id="ovAudioInput" accept="audio/*">
 
 <script src="ffmpeg.min.js"></script>
 <script>
@@ -494,8 +575,12 @@
 
   // ---------- state ----------
   /** clip: {id,file,url,name,duration,inPoint,outPoint,thumbs:[{t,src}]} */
+  /** overlay: {id,type:'text'|'image'|'video'|'audio',track,start,duration, ...props} */
   let clips = [];
+  let overlays = [];
   let selectedId = null;
+  let selectedOverlayId = null;
+  const MAX_OVERLAY_TRACKS = 3;
   let pxPerSec = 80;
   let playing = false;
   let previewMuted = false;
@@ -503,17 +588,21 @@
   let rafId = null;
   let currentTool = 'select';
   let dragCtx = null; // {type:'trim'|'move', clipId, edge, startX, startIn, startOut}
+  let ovDragCtx = null; // {type:'move'|'resize', id, edge, startX, startY, startStart, startDur, startTrack}
   let scrubbing = false;
 
   const el = (id) => document.getElementById(id);
   const dropzone = el('dropzone'), fileInput = el('fileInput'), pickBtn = el('pickBtn'), addMoreBtn = el('addMoreBtn');
   const workspace = el('workspace'), trackWrap = el('trackWrap'), ruler = el('ruler'), emptyTrack = el('emptyTrack'), audioWrap = el('audioWrap');
+  const overlayTracks = el('overlayTracks'), overlayLayer = el('overlayLayer');
   const previewVideo = el('previewVideo'), previewEmpty = el('previewEmpty');
   const playBtn = el('playBtn'), playIcon = el('playIcon');
   const muteBtn = el('muteBtn'), muteIcon = el('muteIcon');
   const tcNow = el('tcNow'), tcTotal = el('tcTotal');
   const zoomRange = el('zoomRange');
   const inspectorBody = el('inspectorBody');
+  const overlayInspector = el('overlayInspector');
+  const ovImageInput = el('ovImageInput'), ovVideoInput = el('ovVideoInput'), ovAudioInput = el('ovAudioInput');
   const exportBtn = el('exportBtn'), progressWrap = el('progressWrap'), progressFill = el('progressFill'), progressLabel = el('progressLabel');
   const resultWrap = el('resultWrap'), downloadLink = el('downloadLink');
   const toolSelect = el('toolSelect'), toolCut = el('toolCut'), toolDelete = el('toolDelete');
@@ -536,7 +625,11 @@
     const m = Math.floor(s / 60), sec = s - m * 60;
     return String(m).padStart(2,'0') + ':' + sec.toFixed(1).padStart(4,'0');
   };
-  const totalDuration = () => clips.reduce((a,c) => a + (c.outPoint - c.inPoint), 0);
+  const totalDuration = () => {
+    let t = clips.reduce((a,c) => a + (c.outPoint - c.inPoint), 0);
+    overlays.forEach(o => { const end = o.start + o.duration; if (end > t) t = end; });
+    return t;
+  };
   const clipDur = (c) => c.outPoint - c.inPoint;
 
   // ---------- file intake ----------
@@ -732,6 +825,7 @@
     trackWrap.appendChild(ph);
 
     renderAudioTrack(total);
+    renderOverlayTracks(total);
     updateInspector();
   }
 
@@ -770,6 +864,284 @@
       cursor += clipDur(clip);
     });
   }
+
+  // ---------- overlays ----------
+  const OV_TYPE_LABEL = { text:'Text', image:'Image', video:'Video', audio:'Audio' };
+  const OV_DEFAULT_DUR = { text:3, image:3, video:5, audio:5 };
+  const OV_ICON = {
+    text:  '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h10M4 18h14"/></svg>',
+    image: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5L5 20"/></svg>',
+    video: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M10 9l5 3-5 3z"/></svg>',
+    audio: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5L6 9H3v6h3l5 4V5z"/><path d="M15.5 8.5a5 5 0 010 7"/></svg>'
+  };
+
+  // Reusable preview elements, keyed by overlay id.
+  const ovEls = new Map();
+
+  function pickTrack(start, duration) {
+    for (let t = 0; t < MAX_OVERLAY_TRACKS; t++) {
+      const clash = overlays.some(o => o.track === t &&
+        start < o.start + o.duration && o.start < start + duration);
+      if (!clash) return t;
+    }
+    return 0;
+  }
+
+  function addOverlay(type, props) {
+    const duration = props.duration != null ? props.duration : (OV_DEFAULT_DUR[type] || 3);
+    const start = Math.max(0, virtualTime);
+    const ov = Object.assign({
+      id: uid(), type, track: pickTrack(start, duration), start, duration,
+      name: OV_TYPE_LABEL[type] || type,
+      x: 0.5, y: 0.5, scale: 1, opacity: 1, muted: false, volume: 1,
+      inPoint: 0, outPoint: duration
+    }, props);
+    overlays.push(ov);
+    selectOverlay(ov.id);
+    renderTimeline();
+    syncOverlays();
+    return ov;
+  }
+
+  function selectOverlay(id) {
+    selectedOverlayId = id;
+    selectedId = null;
+    renderTimeline();
+    updateInspector();
+    updateOverlayInspector();
+  }
+
+  function deleteOverlay(id) {
+    overlays = overlays.filter(o => o.id !== id);
+    if (selectedOverlayId === id) selectedOverlayId = null;
+    const e = ovEls.get(id);
+    if (e) { if (e.video) e.video.pause(); if (e.audio) e.audio.pause(); e.el.remove(); ovEls.delete(id); }
+    renderTimeline();
+    syncOverlays();
+    updateOverlayInspector();
+  }
+
+  function renderOverlayTracks(total) {
+    overlayTracks.querySelectorAll('.overlay-track').forEach(trackEl => {
+      const t = +trackEl.dataset.track;
+      trackEl.innerHTML = '<span class="lane-no">' + (t + 1) + '</span>';
+      trackEl.style.width = (total * pxPerSec + 100) + 'px';
+      overlays.filter(o => o.track === t).forEach(ov => {
+        const block = document.createElement('div');
+        block.className = 'ov-block type-' + ov.type + (ov.id === selectedOverlayId ? ' selected' : '');
+        block.style.left = (ov.start * pxPerSec) + 'px';
+        block.style.width = Math.max(ov.duration * pxPerSec, 6) + 'px';
+        block.dataset.id = ov.id;
+        block.innerHTML =
+          '<span class="ov-icon">' + (OV_ICON[ov.type] || '') + '</span>' +
+          '<span class="ov-name">' + escapeHtml(ov.name || OV_TYPE_LABEL[ov.type]) + '</span>' +
+          '<div class="handle left" data-edge="start"></div>' +
+          '<div class="handle right" data-edge="end"></div>';
+        trackEl.appendChild(block);
+      });
+    });
+  }
+
+  function ensureOvEl(ov) {
+    let entry = ovEls.get(ov.id);
+    if (entry) return entry;
+    const elx = document.createElement('div');
+    elx.className = 'ov-el';
+    let video = null, audio = null;
+    if (ov.type === 'text') {
+      elx.classList.add('ov-text');
+    } else if (ov.type === 'image') {
+      const img = document.createElement('img');
+      img.className = 'ov-image';
+      img.src = ov.url; elx.appendChild(img);
+    } else if (ov.type === 'video') {
+      video = document.createElement('video');
+      video.className = 'ov-video'; video.src = ov.url; video.playsInline = true; video.preload = 'auto';
+      elx.appendChild(video);
+    } else if (ov.type === 'audio') {
+      audio = document.createElement('audio');
+      audio.src = ov.url; audio.preload = 'auto';
+      ovEls.set(ov.id, { el: elx, video, audio }); // set early so syncOverlays can bind
+      overlayLayer.appendChild(elx);
+      return ovEls.get(ov.id);
+    }
+    ovEls.set(ov.id, { el: elx, video, audio });
+    overlayLayer.appendChild(elx);
+    return ovEls.get(ov.id);
+  }
+
+  function syncOverlays() {
+    const vt = virtualTime;
+    overlays.forEach(ov => {
+      const active = vt >= ov.start && vt < ov.start + ov.duration;
+      if (!active) {
+        const e = ovEls.get(ov.id);
+        if (e) { if (e.video) e.video.pause(); if (e.audio) e.audio.pause(); e.el.style.display = 'none'; }
+        return;
+      }
+      activeIds.add(ov.id);
+      const entry = ensureOvEl(ov);
+      const { el: elx, video, audio } = entry;
+      elx.style.display = 'block';
+      elx.style.opacity = (ov.opacity != null ? ov.opacity : 1);
+      const scale = ov.scale != null ? ov.scale : 1;
+      const w = scale * 100, h = scale * 100;
+      elx.style.width = w + '%';
+      elx.style.height = h + '%';
+      elx.style.left = (ov.x != null ? ov.x : 0.5) * 100 + '%';
+      elx.style.top = (ov.y != null ? ov.y : 0.5) * 100 + '%';
+      elx.style.transform = 'translate(-50%,-50%)';
+
+      if (ov.type === 'text') {
+        elx.textContent = ov.text || '';
+        elx.style.color = ov.color || '#ffffff';
+        elx.style.background = ov.background || 'transparent';
+        elx.style.fontSize = (ov.fontSize || 32) + 'px';
+        elx.style.fontWeight = '600';
+      } else if (ov.type === 'video' && video) {
+        const local = Math.min(ov.outPoint != null ? ov.outPoint : ov.duration, ov.inPoint + (vt - ov.start));
+        if (Math.abs(video.currentTime - local) > 0.08) {
+          try { video.currentTime = Math.max(ov.inPoint, local); } catch (e) {}
+        }
+        video.muted = previewMuted || !!ov.muted;
+        if (playing) video.play().catch(()=>{}); else video.pause();
+      } else if (ov.type === 'audio' && audio) {
+        const local = Math.min(ov.outPoint != null ? ov.outPoint : ov.duration, ov.inPoint + (vt - ov.start));
+        if (Math.abs(audio.currentTime - local) > 0.08) {
+          try { audio.currentTime = Math.max(ov.inPoint, local); } catch (e) {}
+        }
+        audio.muted = previewMuted;
+        audio.volume = ov.volume != null ? ov.volume : 1;
+        if (playing) audio.play().catch(()=>{}); else audio.pause();
+      }
+    });
+    // Remove elements for overlays that no longer exist.
+    ovEls.forEach((entry, id) => {
+      if (!overlays.find(o => o.id === id)) {
+        if (entry.video) entry.video.pause();
+        if (entry.audio) entry.audio.pause();
+        entry.el.remove();
+        ovEls.delete(id);
+      }
+    });
+  }
+
+  function updateOverlayInspector() {
+    const ov = overlays.find(o => o.id === selectedOverlayId);
+    if (!ov) { overlayInspector.innerHTML = '<div class="none">Click an overlay on the timeline</div>'; return; }
+    const num = (v) => '<input type="number" step="0.1" data-prop="' + v + '" value="' + (ov[v] != null ? ov[v] : '') + '">';
+    let html = '';
+    html += '<div class="ov-field"><label>Name</label><input type="text" data-prop="name" value="' + escapeHtml(ov.name || '') + '"></div>';
+    html += '<div class="ov-field row2"><div style="flex:1"><label>Start (s)</label>' + num('start') + '</div><div style="flex:1"><label>Duration (s)</label>' + num('duration') + '</div></div>';
+    html += '<div class="ov-field"><label>Track</label><select data-prop="track">' +
+      [0,1,2].map(t => '<option value="' + t + '"' + (ov.track === t ? ' selected' : '') + '>' + (t+1) + '</option>').join('') + '</select></div>';
+
+    if (ov.type === 'text') {
+      html += '<div class="ov-field"><label>Text</label><textarea data-prop="text">' + escapeHtml(ov.text || '') + '</textarea></div>';
+      html += '<div class="ov-field row2"><div style="flex:1"><label>Color</label><input type="color" data-prop="color" value="' + (ov.color || '#ffffff') + '"></div>';
+      html += '<div style="flex:1"><label>BG</label><input type="color" data-prop="background" value="' + (ov.background || '#000000') + '"></div></div>';
+      html += '<div class="ov-field"><label>Font size (px)</label>' + num('fontSize') + '</div>';
+    }
+    if (ov.type === 'text' || ov.type === 'image' || ov.type === 'video') {
+      html += '<div class="ov-field row2"><div style="flex:1"><label>X (0–1)</label>' + num('x') + '</div><div style="flex:1"><label>Y (0–1)</label>' + num('y') + '</div></div>';
+      html += '<div class="ov-field"><label>Scale (1 = full)</label>' + num('scale') + '</div>';
+    }
+    if (ov.type === 'video') {
+      html += '<div class="ov-field row2"><label style="flex:1">Mute source</label><label class="switch"><input type="checkbox" data-prop="muted"' + (ov.muted ? ' checked' : '') + '><span class="slider"></span></label></div>';
+      html += '<div class="ov-field row2"><div style="flex:1"><label>In (s)</label>' + num('inPoint') + '</div><div style="flex:1"><label>Out (s)</label>' + num('outPoint') + '</div></div>';
+    }
+    if (ov.type === 'audio') {
+      html += '<div class="ov-field"><label>Volume (0–1)</label>' + num('volume') + '</div>';
+      html += '<div class="ov-field row2"><div style="flex:1"><label>In (s)</label>' + num('inPoint') + '</div><div style="flex:1"><label>Out (s)</label>' + num('outPoint') + '</div></div>';
+    }
+    html += '<div class="ov-field"><label>Opacity (0–1)</label>' + num('opacity') + '</div>';
+    html += '<button class="btn btn-danger ov-del" data-del="1">Delete overlay</button>';
+    overlayInspector.innerHTML = html;
+  }
+
+  // Delegated edits from the inspector.
+  function onOverlayField(e) {
+    const ov = overlays.find(o => o.id === selectedOverlayId);
+    if (!ov) return;
+    const prop = e.target.dataset.prop;
+    if (!prop) return;
+    if (e.target.type === 'checkbox') ov[prop] = e.target.checked;
+    else if (e.target.type === 'number') ov[prop] = parseFloat(e.target.value) || 0;
+    else ov[prop] = e.target.value;
+    if (prop === 'track') ov.track = parseInt(e.target.value, 10);
+    if (prop === 'start' && ov.start < 0) ov.start = 0;
+    renderTimeline();
+    syncOverlays();
+  }
+  overlayInspector.addEventListener('input', onOverlayField);
+  overlayInspector.addEventListener('change', onOverlayField);
+  overlayInspector.addEventListener('click', (e) => {
+    if (e.target.dataset.del) deleteOverlay(selectedOverlayId);
+  });
+
+  // Toolbar: add overlays at the current playhead.
+  el('addTextBtn').addEventListener('click', () => {
+    const text = prompt('Overlay text:', 'Your text here');
+    if (text == null) return;
+    addOverlay('text', { text, color: '#ffffff', background: 'transparent', fontSize: 32 });
+  });
+  el('addImageBtn').addEventListener('click', () => ovImageInput.click());
+  el('addVideoBtn').addEventListener('click', () => ovVideoInput.click());
+  el('addAudioBtn').addEventListener('click', () => ovAudioInput.click());
+
+  function probeDuration(url, kind) {
+    return new Promise((resolve) => {
+      const node = document.createElement(kind === 'audio' ? 'audio' : 'video');
+      node.preload = 'metadata';
+      node.src = url;
+      node.onloadedmetadata = () => resolve(node.duration || (kind === 'image' ? OV_DEFAULT_DUR.image : 5));
+      node.onerror = () => resolve(kind === 'image' ? OV_DEFAULT_DUR.image : 5);
+    });
+  }
+
+  ovImageInput.addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const url = URL.createObjectURL(file);
+    addOverlay('image', { url, file, name: file.name, duration: OV_DEFAULT_DUR.image });
+    ovImageInput.value = '';
+  });
+  ovVideoInput.addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const url = URL.createObjectURL(file);
+    const dur = await probeDuration(url, 'video');
+    addOverlay('video', { url, file, name: file.name, duration: dur, inPoint: 0, outPoint: dur });
+    ovVideoInput.value = '';
+  });
+  ovAudioInput.addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const url = URL.createObjectURL(file);
+    const dur = await probeDuration(url, 'audio');
+    addOverlay('audio', { url, file, name: file.name, duration: dur, inPoint: 0, outPoint: dur, volume: 1 });
+    ovAudioInput.value = '';
+  });
+
+  // Overlay track pointer interaction (select / move / resize / delete).
+  overlayTracks.addEventListener('pointerdown', (e) => {
+    const block = e.target.closest('.ov-block');
+    if (!block) return;
+    const id = block.dataset.id;
+    const ov = overlays.find(o => o.id === id);
+    if (!ov) return;
+    if (currentTool === 'delete') { deleteOverlay(id); return; }
+    if (currentTool === 'cut') return;
+    selectOverlay(id);
+    const handle = e.target.closest('.handle');
+    if (handle) {
+      ovDragCtx = { type:'resize', id, edge: handle.dataset.edge, startX: e.clientX, startStart: ov.start, startDur: ov.duration };
+    } else {
+      ovDragCtx = { type:'move', id, startX: e.clientX, startY: e.clientY, startStart: ov.start, startTrack: ov.track };
+    }
+    overlayTracks.setPointerCapture(e.pointerId);
+    e.stopPropagation();
+  });
 
   function escapeHtml(s){ return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
@@ -856,6 +1228,30 @@
 
   window.addEventListener('pointermove', (e) => {
     if (scrubbing) { seekFromClientX(e.clientX); return; }
+    if (ovDragCtx) {
+      const ov = overlays.find(o => o.id === ovDragCtx.id);
+      if (ov) {
+        const dx = e.clientX - ovDragCtx.startX;
+        const dt = dx / pxPerSec;
+        if (ovDragCtx.type === 'move') {
+          ov.start = Math.max(0, ovDragCtx.startStart + dt);
+          const dy = e.clientY - ovDragCtx.startY;
+          const dtrack = Math.round(dy / 46);
+          ov.track = Math.max(0, Math.min(MAX_OVERLAY_TRACKS - 1, ovDragCtx.startTrack + dtrack));
+        } else if (ovDragCtx.type === 'resize') {
+          if (ovDragCtx.edge === 'start') {
+            const ns = Math.max(0, Math.min(ovDragCtx.startStart + dt, ovDragCtx.startStart + ovDragCtx.startDur - 0.1));
+            ov.start = ns;
+            ov.duration = (ovDragCtx.startStart + ovDragCtx.startDur) - ns;
+          } else {
+            ov.duration = Math.max(0.1, ovDragCtx.startDur + dt);
+          }
+        }
+        renderTimeline();
+        syncOverlays();
+      }
+      return;
+    }
     if (!dragCtx) return;
     const clip = clips.find(c => c.id === dragCtx.clipId);
     if (!clip) return;
@@ -888,13 +1284,21 @@
     if (dragCtx && (dragCtx.type === 'trim')) {
       updatePreviewSource();
     }
+    if (ovDragCtx) {
+      updateOverlayInspector();
+      syncOverlays();
+    }
     dragCtx = null;
+    ovDragCtx = null;
     scrubbing = false;
   });
 
   function selectClip(id) {
     selectedId = id;
+    selectedOverlayId = null;
     renderTimeline();
+    updateInspector();
+    updateOverlayInspector();
   }
 
   function deleteClip(id) {
@@ -947,6 +1351,12 @@
     if (e.key === 'c') setTool('cut');
     if (e.key === 'v' || e.key === 'Escape') setTool('select');
     if (e.key === ' ') { e.preventDefault(); togglePlay(); }
+    if ((e.key === 'Delete' || e.key === 'Backspace') && selectedOverlayId) {
+      const tag = (document.activeElement && document.activeElement.tagName) || '';
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      e.preventDefault();
+      deleteOverlay(selectedOverlayId);
+    }
   });
 
   zoomRange.addEventListener('input', () => { pxPerSec = +zoomRange.value; renderTimeline(); });
@@ -1008,6 +1418,7 @@
     updatePreviewSource();
     updateClock();
     renderTimeline();
+    syncOverlays();
   }
 
   function updateClock() {
@@ -1025,10 +1436,12 @@
       previewVideo.muted = hit ? effectiveMute(hit.clip) : previewMuted;
       updateMuteUI();
       previewVideo.play().catch(()=>{});
+      syncOverlays();
       lastFrame = performance.now();
       rafId = requestAnimationFrame(loop);
     } else {
       previewVideo.pause();
+      syncOverlays();
       cancelAnimationFrame(rafId);
     }
   }
@@ -1064,10 +1477,11 @@
       playing = false;
       playIcon.innerHTML = '<path d="M8 5v14l11-7z"/>';
       previewVideo.pause();
-      updatePreviewSource(); updateClock(); renderTimeline();
+      updatePreviewSource(); updateClock(); syncOverlays(); renderTimeline();
       return;
     }
     updatePreviewSource();
+    syncOverlays();
     updateClock();
     const ph = trackWrap.querySelector('.playhead');
     if (ph) ph.style.left = (virtualTime * pxPerSec) + 'px';

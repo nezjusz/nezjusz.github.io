@@ -59,7 +59,100 @@ dim.oninput=()=>{dimValue.textContent=dim.value+'%';if(!playing)draw(0)};
 async function play(){if(!prepare()||playing)return;playing=true;previewBtn.disabled=true;if(video){video.currentTime=0;try{await video.play()}catch{}}const ms=+durInput.value*1000,total=ms*scenes.length,start=performance.now();const frame=now=>{if(!playing)return;const e=now-start;if(e>=total){playing=false;previewBtn.disabled=false;if(video)video.pause();draw(scenes.length-1,1);progress.style.width='100%';status.textContent='Podgląd gotowy.';return}const i=Math.min(scenes.length-1,Math.floor(e/ms));draw(i,(e%ms)/ms);progress.style.width=e/total*100+'%';status.textContent=`Scena ${i+1}/${scenes.length}`;raf=requestAnimationFrame(frame)};raf=requestAnimationFrame(frame)}
 function stop(){playing=false;cancelAnimationFrame(raf);if(video)video.pause();previewBtn.disabled=false}
 previewBtn.onclick=play;
-async function exportVideo(){if(!prepare())return;stop();exportBtn.disabled=true;status.textContent='Przygotowanie renderu...';progress.style.width='0%';const mobile=innerWidth<700||/Android|iPhone|iPad|iPod/i.test(navigator.userAgent);const fps=mobile?24:30;const stream=c.captureStream(fps);const candidates=mobile?['video/webm;codecs=vp8','video/webm']:['video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm'];const mime=candidates.find(x=>MediaRecorder.isTypeSupported(x));if(!mime){alert('Ta przeglądarka nie obsługuje WebM.');exportBtn.disabled=false;return}const recorder=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:mobile?3_500_000:7_000_000});const chunks=[];recorder.ondataavailable=e=>e.data.size&&chunks.push(e.data);const stopped=new Promise(r=>recorder.onstop=r);recorder.start(250);if(video){video.currentTime=0;try{await video.play()}catch{}}const ms=+durInput.value*1000,total=ms*scenes.length,start=performance.now();await new Promise(resolve=>{const loop=now=>{const e=now-start;if(e>=total){draw(scenes.length-1,1);progress.style.width='100%';resolve();return}const i=Math.min(scenes.length-1,Math.floor(e/ms));draw(i,(e%ms)/ms);progress.style.width=e/total*100+'%';status.textContent=`Renderowanie ${Math.floor(e/total*100)}%`;requestAnimationFrame(loop)};requestAnimationFrame(loop)});if(video)video.pause();recorder.stop();await stopped;const blob=new Blob(chunks,{type:mime});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='storyforge-short.webm';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);status.textContent='✅ Gotowe — WebM pobrane.';exportBtn.disabled=false}
+async function exportVideo(){
+if(!prepare())return;
+stop();
+exportBtn.disabled=true;
+previewBtn.disabled=true;
+progress.style.width='0%';
+status.textContent='Przygotowywanie…';
+
+const mobile=innerWidth<700||/Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+// Nie renderujemy ogromnego canvasu na telefonie.
+setupCanvas();
+
+const fps=mobile?20:30;
+const candidates=mobile?['video/webm;codecs=vp8','video/webm']:['video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm'];
+const mime=candidates.find(x=>MediaRecorder.isTypeSupported(x));
+if(!mime){status.textContent='Ta przeglądarka nie obsługuje WebM.';exportBtn.disabled=false;previewBtn.disabled=false;return}
+
+// Dajemy przeglądarce klatkę na odświeżenie UI przed ciężkim renderem.
+await new Promise(r=>setTimeout(r,120));
+
+if(video){
+  video.pause();
+  try{video.currentTime=0}catch{}
+  // Nie czekamy na video.play(). To potrafi blokować eksport na telefonach.
+  try{const p=video.play();if(p&&p.catch)p.catch(()=>{})}catch{}
+}
+
+const stream=c.captureStream(fps);
+const recorder=new MediaRecorder(stream,{mimeType,videoBitsPerSecond:mobile?2200000:6500000});
+const chunks=[];
+let recorderError=null;
+recorder.ondataavailable=e=>{if(e.data&&e.data.size)chunks.push(e.data)};
+recorder.onerror=e=>{recorderError=e.error||new Error('MediaRecorder error')};
+const stopped=new Promise(resolve=>recorder.onstop=resolve);
+
+try{
+  recorder.start(250);
+}catch(e){
+  status.textContent='Nie udało się uruchomić eksportu.';
+  exportBtn.disabled=false;previewBtn.disabled=false;return;
+}
+
+status.textContent='Renderowanie 0%';
+await new Promise(resolve=>{
+  const ms=+durInput.value*1000;
+  const total=Math.max(ms*scenes.length,1000);
+  const start=performance.now();
+  let lastPaint=0;
+  const loop=now=>{
+    const elapsed=now-start;
+    if(elapsed>=total){
+      draw(scenes.length-1,1);
+      progress.style.width='100%';
+      status.textContent='Renderowanie 100%';
+      resolve();
+      return;
+    }
+    const i=Math.min(scenes.length-1,Math.floor(elapsed/ms));
+    const p=(elapsed%ms)/ms;
+    draw(i,p);
+    // Nie aktualizujemy DOM co każdą klatkę — na telefonie powoduje to przycięcia.
+    if(now-lastPaint>120){
+      const pct=Math.floor(elapsed/total*100);
+      progress.style.width=pct+'%';
+      status.textContent=`Renderowanie ${pct}%`;
+      lastPaint=now;
+    }
+    requestAnimationFrame(loop);
+  };
+  requestAnimationFrame(loop);
+});
+
+if(video)video.pause();
+await new Promise(r=>setTimeout(r,80));
+recorder.stop();
+await stopped;
+
+if(recorderError||!chunks.length){
+  status.textContent='Eksport nie powiódł się. Spróbuj ponownie.';
+  exportBtn.disabled=false;previewBtn.disabled=false;return;
+}
+
+const blob=new Blob(chunks,{type:mime});
+const url=URL.createObjectURL(blob);
+const a=document.createElement('a');
+a.href=url;
+a.download='storyforge-short.webm';
+document.body.appendChild(a);a.click();a.remove();
+setTimeout(()=>URL.revokeObjectURL(url),5000);
+status.textContent='✅ Gotowe — film pobrany.';
+progress.style.width='100%';
+exportBtn.disabled=false;
+previewBtn.disabled=false;
+}
 exportBtn.onclick=exportVideo;
 clearBtn.onclick=()=>{stop();story.value='';bgInput.value='';scenes=[];bg=null;video=null;if(bgURL)URL.revokeObjectURL(bgURL);bgURL=null;progress.style.width='0';status.textContent='Wklej tekst i uruchom podgląd.';draw()};
 story.oninput=()=>{if(!playing){prepare();draw(0)}};styleInput.onchange=()=>!playing&&draw(0);fit.onchange=()=>!playing&&draw(0);draw();

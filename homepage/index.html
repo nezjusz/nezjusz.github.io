@@ -517,19 +517,30 @@ document.getElementById('weatherApply').addEventListener('click', () => {
 });
 
 /* ---- Quick links ---- */
+function sanitizeQuickLinks(items) {
+  if (!Array.isArray(items)) return [];
+  return items.slice(0,50).filter(link => link && typeof link.name === 'string' && link.name.length <= 120 && typeof link.url === 'string' && link.url.length <= 2048).map(link => {
+    try {
+      const u=new URL(link.url);
+      if(u.protocol!=='http:'&&u.protocol!=='https:')return null;
+      return {name:link.name.trim().slice(0,120),url:u.href};
+    }catch(e){return null;}
+  }).filter(Boolean);
+}
+
 function getLinks() {
   const stored = localStorage.getItem('quickLinks');
   if (stored) {
     try {
       const parsed = JSON.parse(stored);
-      if (Array.isArray(parsed)) return parsed;
+      if (Array.isArray(parsed)) return sanitizeQuickLinks(parsed);
     } catch (e) {}
   }
   return DEFAULT_LINKS.map(l => ({ name: l.name, url: l.url }));
 }
 
 function saveLinks(links) {
-  localStorage.setItem('quickLinks', JSON.stringify(links));
+  localStorage.setItem('quickLinks', JSON.stringify(sanitizeQuickLinks(links)));
 }
 
 function renderLinks() {
@@ -539,7 +550,6 @@ function renderLinks() {
     const a = document.createElement('a');
     a.href = link.url;
     a.className = 'link-card';
-
     const def = DEFAULT_LINKS.find(d => d.url === link.url);
     let iconHtml;
     if (def) {
@@ -552,7 +562,6 @@ function renderLinks() {
         iconHtml = `<span class="link-icon letter-icon">${escapeHtml(link.name.charAt(0).toUpperCase() || '?')}</span>`;
       }
     }
-
     a.innerHTML = iconHtml + `<span class="link-text">${escapeHtml(link.name)}</span>`;
     grid.appendChild(a);
   });
@@ -563,8 +572,7 @@ function renderManageList() {
   ul.innerHTML = '';
   getLinks().forEach((link, i) => {
     const li = document.createElement('li');
-    li.innerHTML = `<span class="manage-name">${escapeHtml(link.name)}</span>` +
-      `<button type="button" class="remove-link-btn" data-index="${i}" aria-label="Remove ${escapeHtml(link.name)}">×</button>`;
+    li.innerHTML = `<span class="manage-name">${escapeHtml(link.name)}</span>` + `<button type="button" class="remove-link-btn" data-index="${i}" aria-label="Remove ${escapeHtml(link.name)}">Ă—</button>`;
     ul.appendChild(li);
   });
 }
@@ -585,7 +593,9 @@ document.getElementById('addLinkBtn').addEventListener('click', () => {
   if (!name || !url) return;
   if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
   try {
-    new URL(url);
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('protocol');
+    url = parsed.href;
   } catch (e) {
     errEl.textContent = 'That URL doesn\'t look valid.';
     return;
@@ -596,7 +606,7 @@ document.getElementById('addLinkBtn').addEventListener('click', () => {
     return;
   }
   errEl.textContent = '';
-  links.push({ name, url });
+  links.push({ name: name.slice(0,120), url });
   saveLinks(links);
   document.getElementById('newLinkName').value = '';
   document.getElementById('newLinkUrl').value = '';
@@ -607,7 +617,7 @@ document.getElementById('newLinkUrl').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') document.getElementById('addLinkBtn').click();
 });
 
-/* ---- Search functionality ---- */
+/* ---- Search functionality ---- *//* ---- Search functionality ---- */
 const searchInput = document.getElementById('search');
 const clearSearchBtn = document.getElementById('clearSearch');
 
@@ -732,7 +742,7 @@ document.getElementById('importFile').addEventListener('change', (e) => {
       if (data.theme === 'light' || data.theme === 'dark') localStorage.setItem('theme', data.theme);
       if (data.timeFormat === '12' || data.timeFormat === '24') localStorage.setItem('timeFormat', data.timeFormat);
       if (['default', 'auto', 'dusk', 'ocean', 'sunset'].includes(data.background)) localStorage.setItem('background', data.background);
-      if (Array.isArray(data.quickLinks)) localStorage.setItem('quickLinks', JSON.stringify(data.quickLinks));
+      if (Array.isArray(data.quickLinks)) saveLinks(data.quickLinks);
       if (typeof data.notes === 'string') {
         localStorage.setItem('notes', data.notes);
         document.getElementById('notesText').value = data.notes;

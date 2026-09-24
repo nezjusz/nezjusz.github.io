@@ -336,6 +336,7 @@
         const progressPercent = document.getElementById('progressPercent');
 
         let selectedFile = null;
+        const MAX_INPUT_FILE_BYTES = 2 * 1024 * 1024 * 1024; // 2 GiB
         let videoDurationSec = 0;
 
         advancedToggleBtn.addEventListener('click', () => {
@@ -369,6 +370,7 @@
         });
 
         function handleFileSelection(file) {
+            if (file.size > MAX_INPUT_FILE_BYTES) return alert('Please choose a video file up to 2 GiB.');
             if (!file.type.startsWith('video/')) return alert('Please choose a video file.');
             selectedFile = file;
 
@@ -407,7 +409,8 @@
             progressBar.style.width = '0%';
             progressPercent.innerText = '0%';
 
-            const inputName = 'input_' + selectedFile.name;
+            const inputExt = (selectedFile.name.match(/\\.[a-zA-Z0-9]{1,10}$/) || ['.mp4'])[0];
+            const inputName = 'input' + inputExt;
             const outputName = 'output.gif';
 
             ffmpeg.setProgress(({ ratio }) => {

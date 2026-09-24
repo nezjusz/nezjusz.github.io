@@ -488,6 +488,7 @@
         const MAX_QUEUE_SIZE = 10;
         const LARGE_FILE_BYTES = 500 * 1024 * 1024; // 500 MB
         const LONG_CLIP_SECONDS = 5 * 60; // 5 minutes
+        const MAX_INPUT_FILE_BYTES = 2 * 1024 * 1024 * 1024; // 2 GiB
 
         // DOM references
         const loadingStatus = document.getElementById('loadingStatus');
@@ -668,7 +669,10 @@
         // ---------- File selection ----------
 
         function addFilesToQueue(fileList) {
-            const incoming = Array.from(fileList).filter(f => f.type.startsWith('video/'));
+            const allIncoming = Array.from(fileList);
+            const oversized = allIncoming.filter(f => f && f.size > MAX_INPUT_FILE_BYTES).length;
+            if (oversized) alert(oversized === 1 ? 'One video is over the 2 GiB limit.' : oversized + ' videos are over the 2 GiB limit.');
+            const incoming = allIncoming.filter(f => f.type.startsWith('video/') && f.size <= MAX_INPUT_FILE_BYTES);
             if (incoming.length === 0) {
                 alert('Please choose video files.');
                 return;

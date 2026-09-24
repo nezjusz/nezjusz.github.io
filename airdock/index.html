@@ -493,11 +493,15 @@
   const toastEl = $('toast');
 
   const CHUNK_SIZE = 64 * 1024;
+  const MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024;
+  const MAX_ACTIVE_TRANSFERS = 3;
+  const MAX_TRANSFER_ID_LENGTH = 64;
+  const TRANSFER_TIMEOUT_MS = 30000;
   let peer = null;
   let conn = null;
   let myCode = '';
   let queuedFiles = [];
-  let incomingMeta = {}; // transferId -> {name,size,received bytes array,chunks}
+  let incomingMeta = {}; // transferId -> {name,size,received,chunks,url,completed}
   let sending = false;
 
   function toast(msg){
@@ -514,8 +518,31 @@
     return (b/1024/1024/1024).toFixed(2) + ' GB';
   }
 
-  function setStatus(state, text){
-    statusDot.className = 'dot' + (state ? ' ' + state : '');
+  function isValidTransferId(id){
+    return typeof id === 'string' && id.length > 0 && id.length <= MAX_TRANSFER_ID_LENGTH && /^[A-Za-z0-9_-]+$/.test(id);
+  }
+
+  function isValidFileMeta(msg){
+    return msg && typeof msg.name === 'string' && msg.name.length > 0 && msg.name.length <= 255 &&
+      typeof msg.size === 'number' && Number.isSafeInteger(msg.size) && msg.size >= 0 && msg.size <= MAX_FILE_SIZE &&
+      (msg.mime == null || (typeof msg.mime === 'string' && msg.mime.length <= 255));
+  }
+
+  function abortIncomingTransfer(id){
+    const m = incomingMeta[id];
+    if(!m) return;
+    if(m.url){ try{ URL.revokeObjectURL(m.url); }catch(e){} }
+    delete incomingMeta[id];
+    const row = $('rrow_' + id);
+    if(row) row.remove();
+    if(!Object.keys(incomingMeta).length) receiveEmpty.style.display = '';
+  }
+
+  function abortAllIncomingTransfers(){
+    Object.keys(incomingMeta).forEach(abortIncomingTransfer);
+  }
+
+  function setStatus(state, text){    statusDot.className = 'dot' + (state ? ' ' + state : '');
     statusText.textContent = text;
   }
 
@@ -626,9 +653,24 @@
     conn = c;
     connectSection.style.display = 'none';
     connBanner.style.display = 'flex';
-    const otherCode = (c.peer || '').replace('airdock-','');
-    connBanner.innerHTML = '<div class="who"><span class="dot live"></span>Connected to <b>' + otherCode + '</b></div><button class="disconnect-btn" id="discBtn">disconnect</button>';
-    $('discBtn').addEventListener('click', () => { c.close(); });
+
+    const otherCode = (c.peer || '').replace(/^airdock-/,'');
+    connBanner.replaceChildren();
+    const who = document.createElement('div');
+    who.className = 'who';
+    const dot = document.createElement('span');
+    dot.className = 'dot live';
+    const label = document.createElement('span');
+    label.textContent = 'Connected to ';
+    const peerLabel = document.createElement('b');
+    peerLabel.textContent = otherCode;
+    who.append(dot,label,peerLabel);
+    const discBtn = document.createElement('button');
+    discBtn.className = 'disconnect-btn';
+    discBtn.type = 'button';
+    discBtn.textContent = 'disconnect';
+    discBtn.addEventListener('click', () => c.close());
+    connBanner.append(who,discBtn);
 
     dropzone.classList.remove('disabled');
     dzSub.textContent = 'Drop files here, or click to browse';
@@ -647,6 +689,7 @@
       connectSection.style.display = 'block';
       dropzone.classList.add('disabled');
       dzSub.textContent = 'Connect to a device above to enable sending';
+      abortAllIncomingTransfers();
       conn = null;
       radarSweep.classList.remove('paused');
       setStatus('live', 'ready on this network');
@@ -654,7 +697,6 @@
     });
     c.on('error', err => { console.error(err); toast('Connection error'); });
   }
-
   // ---------- Sending ----------
   dropzone.addEventListener('click', () => { if(conn) fileInput.click(); });
   dropzone.addEventListener('dragover', e => { e.preventDefault(); if(conn) dropzone.classList.add('drag'); });
@@ -668,14 +710,16 @@
   fileInput.addEventListener('change', () => { addFiles(fileInput.files); fileInput.value=''; });
 
   function addFiles(fileListObj){
-    const files = Array.from(fileListObj);
+    const allFiles = Array.from(fileListObj);
+    const rejected = allFiles.filter(f => f && f.size > MAX_FILE_SIZE).length;
+    if(rejected) toast(rejected === 1 ? 'One file is too large' : rejected + ' files are too large');
+    const files = allFiles.filter(f => f && typeof f.name === 'string' && f.name.length <= 255 && Number.isSafeInteger(f.size) && f.size <= MAX_FILE_SIZE);
     files.forEach(f => {
-      const id = 'f_' + Math.random().toString(36).slice(2,9);
-      queuedFiles.push({id, file: f, status:'queued'});
+      const id = 'f_' + (crypto?.randomUUID ? crypto.randomUUID().replace(/-/g,'').slice(0,24) : Math.random().toString(36).slice(2,26));
+      queuedFiles.push({id,file:f,status:'queued'});
     });
     renderSendList();
   }
-
   function renderSendList(){
     sendList.innerHTML = '';
     sendActions.style.display = queuedFiles.length ? 'flex' : 'none';
@@ -722,93 +766,102 @@
 
   function sendFile(item){
     return new Promise((resolve) => {
-      const {id, file} = item;
-      const statusEl = $('status_' + id);
-      const fillEl = $('fill_' + id);
-      statusEl.textContent = '0%';
-      conn.send({ type:'meta', id, name:file.name, size:file.size, mime:file.type });
-
-      const reader = new FileReader();
-      let offset = 0;
-
-      function readSlice(o){
-        const slice = file.slice(o, o + CHUNK_SIZE);
-        reader.readAsArrayBuffer(slice);
-      }
-
-      reader.onload = e => {
-        conn.send({ type:'chunk', id, data: e.target.result });
-        offset += e.target.result.byteLength;
-        const pct = Math.min(100, Math.round((offset/file.size)*100));
-        fillEl.style.width = pct + '%';
-        statusEl.textContent = pct + '%';
-        if(offset < file.size){
-          // slight throttle to keep UI + channel responsive
-          if(conn.dataChannel && conn.dataChannel.bufferedAmount > 8 * CHUNK_SIZE){
-            setTimeout(() => readSlice(offset), 30);
-          } else {
-            readSlice(offset);
-          }
-        } else {
-          conn.send({ type:'done', id });
-          statusEl.textContent = 'sent';
-          statusEl.classList.add('ok');
-          item.status = 'done';
-          resolve();
+      const {id,file}=item;
+      const statusEl=$('status_'+id), fillEl=$('fill_'+id);
+      if(!file || file.size > MAX_FILE_SIZE){ if(statusEl) statusEl.textContent='too large'; item.status='error'; resolve(false); return; }
+      if(!conn || !conn.open){ if(statusEl) statusEl.textContent='disconnected'; item.status='error'; resolve(false); return; }
+      statusEl.textContent='0%';
+      try { conn.send({type:'meta',id,name:file.name,size:file.size,mime:file.type||'application/octet-stream'}); }
+      catch(e){ statusEl.textContent='failed'; item.status='error'; resolve(false); return; }
+      const reader=new FileReader();
+      let offset=0, settled=false, timeoutId=null;
+      const finish=(ok,label)=>{
+        if(settled)return; settled=true;
+        if(timeoutId)clearTimeout(timeoutId);
+        reader.onload=null; reader.onerror=null; reader.onabort=null;
+        if(!ok){ statusEl.textContent=label||'failed'; item.status='error'; }
+        resolve(ok);
+      };
+      const arm=()=>{ if(timeoutId)clearTimeout(timeoutId); timeoutId=setTimeout(()=>finish(false,'timed out'),TRANSFER_TIMEOUT_MS); };
+      const readSlice=(o)=>{
+        if(settled)return;
+        if(!conn || !conn.open){ finish(false,'disconnected'); return; }
+        try{ arm(); reader.readAsArrayBuffer(file.slice(o,o+CHUNK_SIZE)); }catch(e){ finish(false,'read error'); }
+      };
+      reader.onload=e=>{
+        const data=e?.target?.result;
+        if(settled)return;
+        if(!(data instanceof ArrayBuffer)||data.byteLength>CHUNK_SIZE){finish(false,'invalid chunk');return;}
+        if(!conn||!conn.open){finish(false,'disconnected');return;}
+        try{conn.send({type:'chunk',id,data});}catch(err){finish(false,'connection error');return;}
+        offset+=data.byteLength;
+        const pct=file.size===0?100:Math.min(100,Math.round(offset/file.size*100));
+        fillEl.style.width=pct+'%'; statusEl.textContent=pct+'%';
+        if(offset<file.size){
+          if(conn.dataChannel&&conn.dataChannel.bufferedAmount>8*CHUNK_SIZE)setTimeout(()=>readSlice(offset),30);
+          else readSlice(offset);
+        }else{
+          try{conn.send({type:'done',id});}catch(err){finish(false,'connection error');return;}
+          statusEl.textContent='sent'; statusEl.classList.add('ok'); item.status='done'; finish(true);
         }
       };
-      readSlice(0);
+      reader.onerror=()=>finish(false,'read error');
+      reader.onabort=()=>finish(false,'cancelled');
+      if(file.size===0){ try{conn.send({type:'done',id});statusEl.textContent='sent';statusEl.classList.add('ok');item.status='done';finish(true);}catch(e){finish(false,'connection error');} }
+      else readSlice(0);
     });
   }
-
   // ---------- Receiving ----------
   function handleData(msg){
-    if(msg.type === 'meta'){
-      incomingMeta[msg.id] = { name: msg.name, size: msg.size, mime: msg.mime, chunks: [], received: 0 };
-      switchTab('receive');
-      renderReceiveRow(msg.id);
-    } else if(msg.type === 'chunk'){
-      const m = incomingMeta[msg.id];
-      if(!m) return;
-      m.chunks.push(msg.data);
-      m.received += msg.data.byteLength;
-      const pct = Math.min(100, Math.round((m.received/m.size)*100));
-      const fill = $('rfill_' + msg.id);
-      const status = $('rstatus_' + msg.id);
-      if(fill) fill.style.width = pct + '%';
-      if(status) status.textContent = pct + '%';
-    } else if(msg.type === 'done'){
-      const m = incomingMeta[msg.id];
-      if(!m) return;
-      const blob = new Blob(m.chunks, { type: m.mime || 'application/octet-stream' });
-      const url = URL.createObjectURL(blob);
-      const row = $('rrow_' + msg.id);
-      if(row){
-        const status = $('rstatus_' + msg.id);
-        status.outerHTML = `<a class="download-link" href="${url}" download="${escapeHtml(m.name)}">Download</a>`;
+    if(!msg||typeof msg!=='object'||typeof msg.type!=='string')return;
+    if(msg.type==='meta'){
+      if(!isValidTransferId(msg.id)||!isValidFileMeta(msg))return;
+      if(incomingMeta[msg.id])abortIncomingTransfer(msg.id);
+      if(Object.keys(incomingMeta).length>=MAX_ACTIVE_TRANSFERS){toast('Too many active transfers');return;}
+      incomingMeta[msg.id]={name:msg.name,size:msg.size,mime:msg.mime,chunks:[],received:0,url:null,completed:false};
+      switchTab('receive'); renderReceiveRow(msg.id); return;
+    }
+    if(msg.type==='chunk'){
+      if(!isValidTransferId(msg.id))return;
+      const m=incomingMeta[msg.id]; if(!m||m.completed)return;
+      if(!(msg.data instanceof ArrayBuffer)||msg.data.byteLength===0||msg.data.byteLength>CHUNK_SIZE){abortIncomingTransfer(msg.id);toast('Invalid transfer chunk');return;}
+      if(m.received+msg.data.byteLength>m.size){abortIncomingTransfer(msg.id);toast('Transfer exceeded declared size');return;}
+      m.chunks.push(msg.data); m.received+=msg.data.byteLength;
+      const pct=m.size===0?100:Math.min(100,Math.round(m.received/m.size*100));
+      const fill=$('rfill_'+msg.id), status=$('rstatus_'+msg.id);
+      if(fill)fill.style.width=pct+'%'; if(status)status.textContent=pct+'%'; return;
+    }
+    if(msg.type==='done'){
+      if(!isValidTransferId(msg.id))return;
+      const m=incomingMeta[msg.id]; if(!m||m.completed)return;
+      if(m.received!==m.size){abortIncomingTransfer(msg.id);toast('Incomplete transfer rejected');return;}
+      const blob=new Blob(m.chunks,{type:m.mime||'application/octet-stream'});
+      m.chunks=[]; m.url=URL.createObjectURL(blob); m.completed=true;
+      const status=$('rstatus_'+msg.id);
+      if(status){
+        const link=document.createElement('a');
+        link.className='download-link'; link.href=m.url; link.download=m.name; link.textContent='Download';
+        link.addEventListener('click',()=>setTimeout(()=>{try{URL.revokeObjectURL(m.url)}catch(e){} delete incomingMeta[msg.id]; if(!Object.keys(incomingMeta).length)receiveEmpty.style.display='';},1000),{once:true});
+        status.replaceWith(link);
       }
-      toast('Received ' + m.name);
+      toast('Received '+m.name);
     }
   }
-
   function renderReceiveRow(id){
-    receiveEmpty.style.display = 'none';
-    const m = incomingMeta[id];
-    const row = document.createElement('div');
-    row.className = 'file-item';
-    row.id = 'rrow_' + id;
-    row.innerHTML = `
-      <div class="file-icon">${fileSvg()}</div>
-      <div class="file-meta">
-        <div class="file-name">${escapeHtml(m.name)}</div>
-        <div class="file-sub">${fmtBytes(m.size)}</div>
-        <div class="file-progress"><div class="file-progress-fill" id="rfill_${id}"></div></div>
-      </div>
-      <div class="file-status" id="rstatus_${id}">0%</div>
-    `;
-    receiveList.appendChild(row);
+    if(!isValidTransferId(id))return;
+    receiveEmpty.style.display='none';
+    const m=incomingMeta[id]; if(!m)return;
+    const row=document.createElement('div'); row.className='file-item'; row.id='rrow_'+id;
+    const icon=document.createElement('div'); icon.className='file-icon'; icon.innerHTML=fileSvg();
+    const meta=document.createElement('div'); meta.className='file-meta';
+    const name=document.createElement('div'); name.className='file-name'; name.textContent=m.name;
+    const sub=document.createElement('div'); sub.className='file-sub'; sub.textContent=fmtBytes(m.size);
+    const progress=document.createElement('div'); progress.className='file-progress';
+    const fill=document.createElement('div'); fill.className='file-progress-fill'; fill.id='rfill_'+id;
+    progress.appendChild(fill); meta.append(name,sub,progress);
+    const status=document.createElement('div'); status.className='file-status'; status.id='rstatus_'+id; status.textContent='0%';
+    row.append(icon,meta,status); receiveList.appendChild(row);
   }
-
   function fileSvg(){
     return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
   }

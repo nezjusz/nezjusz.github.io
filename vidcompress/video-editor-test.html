@@ -652,6 +652,8 @@
     statusText.textContent = text;
   }
 
+  const MAX_CLIP_FILE_BYTES = 2 * 1024 * 1024 * 1024; // 2 GiB
+  const MAX_WAVEFORM_FILE_BYTES = 256 * 1024 * 1024; // 256 MiB
   const uid = () => Math.random().toString(36).slice(2, 10);
   const randomSuffix = (len) => {
     const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
@@ -691,7 +693,10 @@
   });
 
   async function addFiles(fileList) {
-    const files = Array.from(fileList).filter(f => f.type.startsWith('video/'));
+    const allFiles = Array.from(fileList);
+    const oversized = allFiles.filter(f => f && f.size > MAX_CLIP_FILE_BYTES).length;
+    if (oversized) toast(oversized === 1 ? 'One clip is over the 2 GiB limit.' : oversized + ' clips are over the 2 GiB limit.');
+    const files = allFiles.filter(f => f.type.startsWith('video/') && f.size <= MAX_CLIP_FILE_BYTES);
     if (!files.length) return;
     for (const file of files) {
       const url = URL.createObjectURL(file);
@@ -748,6 +753,7 @@
 
   async function generateWaveform(clip) {
     try {
+      if (clip.file.size > MAX_WAVEFORM_FILE_BYTES) { clip.waveform = false; renderTimeline(); return; }
       const buf = await clip.file.arrayBuffer();
       const AC = window.AudioContext || window.webkitAudioContext;
       const actx = new AC();
@@ -954,6 +960,8 @@
   }
 
   function deleteOverlay(id) {
+    const doomed = overlays.find(o => o.id === id);
+    if (doomed?.url) { try { URL.revokeObjectURL(doomed.url); } catch(e) {} }
     overlays = overlays.filter(o => o.id !== id);
     if (selectedOverlayId === id) selectedOverlayId = null;
     const e = ovEls.get(id);
@@ -1581,6 +1589,8 @@
   }
 
   function deleteClip(id) {
+    const doomed = clips.find(c => c.id === id);
+    if (doomed?.url) { try { URL.revokeObjectURL(doomed.url); } catch(e) {} }
     clips = clips.filter(c => c.id !== id);
     if (selectedId === id) selectedId = clips[0]?.id || null;
     if (!clips.length) { workspace.classList.remove('active'); dropzone.style.display='flex'; }
@@ -1830,7 +1840,7 @@
       // core (or loading the multithreaded core without COOP/COEP) is what throws
       // "RuntimeError: function signature mismatch" on the first run. Using an
       // absolute CDN URL keeps the wasm/worker resolution stable.
-      corePath: 'https://unpkg.com/@ffmpeg/core@0.11.1/dist/umd/ffmpeg-core.js',
+      corePath: new URL('ffmpeg-core.js', document.location.href).href,
       progress: ({ ratio }) => {
         if (ratio >= 0 && ratio <= 1) {
           progressFill.style.width = (ratio * 100).toFixed(0) + '%';
@@ -2035,7 +2045,7 @@
     const baseVid = document.createElement('video');
     baseVid.src = baseUrl; baseVid.muted = true; baseVid.playsInline = true;
     await new Promise((res, rej) => { baseVid.onloadedmetadata = res; baseVid.onerror = rej; });
-    await baseVid.play().catch(() => {});
+    try { await baseVid.play(); } catch(e) { try { URL.revokeObjectURL(baseUrl); } catch(ignore) {} throw new Error('Unable to start source video for overlay export.'); }
 
     const media = {};
     const preloads = [];
@@ -2088,6 +2098,7 @@
       '-map', '0:v:0', '-map', '1:a:0?', '-c:a', 'copy', '-shortest', outName];
     await ff.run(...muxArgs);
     ['rec.webm'].forEach(n => { try { ff.FS('unlink', n); } catch (e) {} });
+    try { URL.revokeObjectURL(baseUrl); } catch(e) {}
     return outName;
   }
 

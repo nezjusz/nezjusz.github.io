@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>TikTok Export Organizer</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.2/jszip.min.js"></script>
 <style>
   :root{
     --bg: #0b0d10;
@@ -222,6 +222,19 @@ function setProgress(pct){
   progressInner.style.width = Math.max(0, Math.min(100, pct)) + '%';
 }
 
+function uniqueFilename(used, rawName){
+  const base = sanitize(rawName);
+  if(!used.has(base)){ used.add(base); return base; }
+  const dot = base.lastIndexOf('.');
+  const stem = dot > 0 ? base.slice(0,dot) : base;
+  const ext = dot > 0 ? base.slice(dot) : '';
+  let i = 2;
+  let candidate = `${stem} (${i})${ext}`;
+  while(used.has(candidate)){ i++; candidate = `${stem} (${i})${ext}`; }
+  used.add(candidate);
+  return candidate;
+}
+
 function sanitize(name){
   return String(name)
     .replace(/[:/\\?*"<>|]/g, '_')
@@ -297,11 +310,12 @@ goBtn.addEventListener('click', async () => {
       // 1:1 chats
       const chatHistory = dmRoot['Direct Messages'] && dmRoot['Direct Messages']['ChatHistory'];
       if (chatHistory){
+        const usedIndividualNames = new Set();
         const individualFolder = dmFolder.folder('Individual Chats');
         for (const [rawKey, messages] of Object.entries(chatHistory)){
           if (!Array.isArray(messages) || messages.length === 0) continue;
           const person = extractName(rawKey, 'Chat History');
-          const filename = sanitize(person) + '.txt';
+          const filename = uniqueFilename(usedIndividualNames, person + '.txt');
           individualFolder.file(filename, formatTranscript(messages, person));
           stats.individualChats++;
           stats.totalMessages += messages.length;
@@ -312,11 +326,12 @@ goBtn.addEventListener('click', async () => {
       // Group chats
       const groupChat = dmRoot['Group Chat'] && dmRoot['Group Chat']['GroupChat'];
       if (groupChat){
+        const usedGroupNames = new Set();
         const groupFolder = dmFolder.folder('Group Chats');
         for (const [rawKey, messages] of Object.entries(groupChat)){
           if (!Array.isArray(messages) || messages.length === 0) continue;
           const group = extractName(rawKey, 'Group Chat');
-          const filename = sanitize(group) + '.txt';
+          const filename = uniqueFilename(usedGroupNames, group + '.txt');
           groupFolder.file(filename, formatTranscript(messages, group));
           stats.groupChats++;
           stats.totalMessages += messages.length;
@@ -340,6 +355,7 @@ goBtn.addEventListener('click', async () => {
     let done = 0;
 
     for (const [categoryName, categoryValue] of entries){
+      const usedCategoryFiles = new Set();
       if (categoryValue === null || categoryValue === undefined) continue;
       const catFolderName = sanitize(categoryName);
       const catFolder = categoriesFolder.folder(catFolderName);
@@ -353,13 +369,13 @@ goBtn.addEventListener('click', async () => {
             (typeof sectionValue === 'object' && Object.keys(sectionValue).length === 0) ||
             (Array.isArray(sectionValue) && sectionValue.length === 0);
           if (isEmpty) continue;
-          const filename = sanitize(sectionName) + '.json';
+          const filename = uniqueFilename(usedCategoryFiles, sectionName + '.json');
           catFolder.file(filename, JSON.stringify(sectionValue, null, 2));
           stats.categoryFiles++;
           wroteAny = true;
         }
       } else {
-        catFolder.file(catFolderName + '.json', JSON.stringify(categoryValue, null, 2));
+        catFolder.file(uniqueFilename(usedCategoryFiles, catFolderName + '.json'), JSON.stringify(categoryValue, null, 2));
         stats.categoryFiles++;
         wroteAny = true;
       }

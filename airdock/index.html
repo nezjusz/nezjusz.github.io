@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
 <title>Airdock — Send files, no app required</title>
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.5/peerjs.min.js" crossorigin="anonymous"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap');
@@ -497,11 +497,15 @@
   const MAX_ACTIVE_TRANSFERS = 3;
   const MAX_TRANSFER_ID_LENGTH = 64;
   const TRANSFER_TIMEOUT_MS = 30000;
+  const INCOMING_TIMEOUT_MS = 60000;
+  const COMPLETED_TRANSFER_TTL_MS = 10 * 60 * 1000;
+  const INCOMING_TOTAL_LIMIT = 768 * 1024 * 1024;
   let peer = null;
   let conn = null;
   let myCode = '';
   let queuedFiles = [];
-  let incomingMeta = {}; // transferId -> {name,size,received,chunks,url,completed}
+  let incomingMeta = {}; // transferId -> {name,size,received,chunks,url,completed,timer,lastActivity}
+  let incomingTotalBytes = 0;
   let sending = false;
 
   function toast(msg){
@@ -528,10 +532,19 @@
       (msg.mime == null || (typeof msg.mime === 'string' && msg.mime.length <= 255));
   }
 
+  function armIncomingTimeout(id, ttl){
+    const m = incomingMeta[id];
+    if(!m) return;
+    if(m.timer) clearTimeout(m.timer);
+    m.timer = setTimeout(() => abortIncomingTransfer(id), ttl);
+  }
+
   function abortIncomingTransfer(id){
     const m = incomingMeta[id];
     if(!m) return;
+    if(m.timer) clearTimeout(m.timer);
     if(m.url){ try{ URL.revokeObjectURL(m.url); }catch(e){} }
+    incomingTotalBytes = Math.max(0, incomingTotalBytes - (m.size || 0));
     delete incomingMeta[id];
     const row = $('rrow_' + id);
     if(row) row.remove();
@@ -547,10 +560,11 @@
   }
 
   function randCode(){
-    // human-friendly code: base36, 8 characters
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    const bytes = new Uint32Array(8);
+    globalThis.crypto.getRandomValues(bytes);
     let s = '';
-    for(let i=0;i<8;i++) s += chars[Math.floor(Math.random()*chars.length)];
+    for(let i=0;i<8;i++) s += chars[bytes[i] % chars.length];
     return s;
   }
 
@@ -567,6 +581,8 @@
       setStatus('live', 'ready on this network');
       radarSweep.classList.remove('paused');
       renderQR(code);
+      checkHash();
+      if(peerInput.value && peerInput.value !== myCode) setTimeout(doConnect, 50);
     });
 
     peer.on('connection', c => {
@@ -761,7 +777,8 @@
     sendBtn.disabled = false;
     sendBtn.textContent = 'Send files';
     sending = false;
-    toast('All files sent');
+    const failed = queuedFiles.filter(item => item.status === 'error').length;
+    toast(failed ? failed + ' file(s) failed' : 'All files sent');
   });
 
   function sendFile(item){
@@ -818,7 +835,10 @@
       if(!isValidTransferId(msg.id)||!isValidFileMeta(msg))return;
       if(incomingMeta[msg.id])abortIncomingTransfer(msg.id);
       if(Object.keys(incomingMeta).length>=MAX_ACTIVE_TRANSFERS){toast('Too many active transfers');return;}
-      incomingMeta[msg.id]={name:msg.name,size:msg.size,mime:msg.mime,chunks:[],received:0,url:null,completed:false};
+      if(incomingTotalBytes + msg.size > INCOMING_TOTAL_LIMIT){toast('Receiver memory limit reached');return;}
+      incomingMeta[msg.id]={name:msg.name,size:msg.size,mime:msg.mime,chunks:[],received:0,url:null,completed:false,timer:null,lastActivity:Date.now()};
+      incomingTotalBytes += msg.size;
+      armIncomingTimeout(msg.id, INCOMING_TIMEOUT_MS);
       switchTab('receive'); renderReceiveRow(msg.id); return;
     }
     if(msg.type==='chunk'){
@@ -827,6 +847,8 @@
       if(!(msg.data instanceof ArrayBuffer)||msg.data.byteLength===0||msg.data.byteLength>CHUNK_SIZE){abortIncomingTransfer(msg.id);toast('Invalid transfer chunk');return;}
       if(m.received+msg.data.byteLength>m.size){abortIncomingTransfer(msg.id);toast('Transfer exceeded declared size');return;}
       m.chunks.push(msg.data); m.received+=msg.data.byteLength;
+      m.lastActivity = Date.now();
+      armIncomingTimeout(msg.id, INCOMING_TIMEOUT_MS);
       const pct=m.size===0?100:Math.min(100,Math.round(m.received/m.size*100));
       const fill=$('rfill_'+msg.id), status=$('rstatus_'+msg.id);
       if(fill)fill.style.width=pct+'%'; if(status)status.textContent=pct+'%'; return;
@@ -837,11 +859,12 @@
       if(m.received!==m.size){abortIncomingTransfer(msg.id);toast('Incomplete transfer rejected');return;}
       const blob=new Blob(m.chunks,{type:m.mime||'application/octet-stream'});
       m.chunks=[]; m.url=URL.createObjectURL(blob); m.completed=true;
+      armIncomingTimeout(msg.id, COMPLETED_TRANSFER_TTL_MS);
       const status=$('rstatus_'+msg.id);
       if(status){
         const link=document.createElement('a');
         link.className='download-link'; link.href=m.url; link.download=m.name; link.textContent='Download';
-        link.addEventListener('click',()=>setTimeout(()=>{try{URL.revokeObjectURL(m.url)}catch(e){} delete incomingMeta[msg.id]; if(!Object.keys(incomingMeta).length)receiveEmpty.style.display='';},1000),{once:true});
+        link.addEventListener('click',()=>setTimeout(()=>{ if(m.timer) clearTimeout(m.timer); try{URL.revokeObjectURL(m.url)}catch(e){} incomingTotalBytes=Math.max(0,incomingTotalBytes-(m.size||0)); delete incomingMeta[msg.id]; if(!Object.keys(incomingMeta).length)receiveEmpty.style.display='';},1000),{once:true});
         status.replaceWith(link);
       }
       toast('Received '+m.name);

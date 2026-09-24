@@ -451,7 +451,9 @@ function updateTime() {
 }
 
 /* ---- Search engine ---- */
-const savedEngine = localStorage.getItem('searchEngine') || 'google';
+const VALID_SEARCH_ENGINES = ['google','bing','duckduckgo','ecosia'];
+const savedEngineRaw = localStorage.getItem('searchEngine');
+const savedEngine = VALID_SEARCH_ENGINES.includes(savedEngineRaw) ? savedEngineRaw : 'google';
 document.querySelector(`input[name="searchEngine"][value="${savedEngine}"]`).checked = true;
 
 document.querySelectorAll('input[name="searchEngine"]').forEach(radio => {
@@ -625,7 +627,8 @@ searchInput.addEventListener('keydown', function(e) {
   if (e.key === 'Enter') {
     const query = this.value;
     if (query) {
-      const engine = localStorage.getItem('searchEngine') || 'google';
+      const engineRaw = localStorage.getItem('searchEngine');
+      const engine = VALID_SEARCH_ENGINES.includes(engineRaw) ? engineRaw : 'google';
       const url = searchEngines[engine] + encodeURIComponent(query);
       window.location.href = url;
     }
@@ -701,7 +704,9 @@ function applyImportedSettings() {
   timeFormat = localStorage.getItem('timeFormat') || '24';
   document.querySelector(`input[name="timeFormat"][value="${timeFormat}"]`).checked = true;
 
-  const engine = localStorage.getItem('searchEngine') || 'google';
+  const importedEngineRaw = localStorage.getItem('searchEngine');
+  const engine = VALID_SEARCH_ENGINES.includes(importedEngineRaw) ? importedEngineRaw : 'google';
+  localStorage.setItem('searchEngine', engine);
   document.querySelector(`input[name="searchEngine"][value="${engine}"]`).checked = true;
 
   renderLinks();
@@ -738,12 +743,12 @@ document.getElementById('importFile').addEventListener('change', (e) => {
   reader.onload = () => {
     try {
       const data = JSON.parse(reader.result);
-      if (typeof data.searchEngine === 'string') localStorage.setItem('searchEngine', data.searchEngine);
+      if (VALID_SEARCH_ENGINES.includes(data.searchEngine)) localStorage.setItem('searchEngine', data.searchEngine);
       if (data.theme === 'light' || data.theme === 'dark') localStorage.setItem('theme', data.theme);
       if (data.timeFormat === '12' || data.timeFormat === '24') localStorage.setItem('timeFormat', data.timeFormat);
       if (['default', 'auto', 'dusk', 'ocean', 'sunset'].includes(data.background)) localStorage.setItem('background', data.background);
       if (Array.isArray(data.quickLinks)) saveLinks(data.quickLinks);
-      if (typeof data.notes === 'string') {
+      if (typeof data.notes === 'string' && data.notes.length <= 200000) {
         localStorage.setItem('notes', data.notes);
         document.getElementById('notesText').value = data.notes;
       }

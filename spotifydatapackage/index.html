@@ -7,7 +7,7 @@
 <meta name="description" content="Turn your Spotify data export into a printable listening receipt. Runs entirely in your browser — nothing is uploaded.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700;1,9..144,500&family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.2/jszip.min.js"></script>
 <style>
   :root{
     --ink:      #17130f;
@@ -553,6 +553,11 @@
   const resultsEl  = document.getElementById('results');
   const resetBtn   = document.getElementById('resetBtn');
   const printBtn   = document.getElementById('printBtn');
+  const MAX_IMPORT_BYTES = 1024 * 1024 * 1024;
+  const MAX_JSON_CHARS = 50 * 1024 * 1024;
+  const MAX_TOTAL_JSON_CHARS = 100 * 1024 * 1024;
+  const MAX_ZIP_ENTRIES = 10000;
+  let totalJsonChars = 0;
 
   dropzone.addEventListener('click', () => fileInput.click());
   dropzone.addEventListener('keydown', (e) => {
@@ -586,6 +591,10 @@
   async function handleFiles(fileList){
     clearError();
     const files = Array.from(fileList);
+    if (files.length > 50 || files.some(f => !f || f.size > MAX_IMPORT_BYTES)) {
+      showError('The selected data is too large to process safely in this browser.');
+      return;
+    }
     const zipFile = files.find(f => f.name.toLowerCase().endsWith('.zip'));
     const jsonFiles = files.filter(f => f.name.toLowerCase().endsWith('.json'));
 
@@ -599,22 +608,32 @@
 
     try{
       let rawEntries = [];
+      totalJsonChars = 0;
 
       if(zipFile){
         const zip = await JSZip.loadAsync(zipFile);
+        const zipNames = Object.keys(zip.files || {});
+        if(zipNames.length > MAX_ZIP_ENTRIES) throw new Error('Archive contains too many files.');
         const jsonEntries = Object.values(zip.files).filter(f => !f.dir && f.name.toLowerCase().endsWith('.json'));
         for(const entry of jsonEntries){
           try{
+            const declaredSize = entry && entry._data && Number.isSafeInteger(entry._data.uncompressedSize) ? entry._data.uncompressedSize : 0;
+            if(declaredSize > MAX_JSON_CHARS || totalJsonChars + declaredSize > MAX_TOTAL_JSON_CHARS) throw new Error('JSON entry is too large.');
             const text = await entry.async('string');
+            if(text.length > MAX_JSON_CHARS || totalJsonChars + text.length > MAX_TOTAL_JSON_CHARS) throw new Error('JSON data is too large.');
+            totalJsonChars += text.length;
             const parsed = JSON.parse(text);
             if(Array.isArray(parsed)) rawEntries.push(...parsed);
           } catch(err){ /* skip unparseable / non-streaming json files */ }
         }
       }
 
-      for(const f of jsonFiles){
+      if(!zipFile) for(const f of jsonFiles){
         try{
+          if(f.size > MAX_JSON_CHARS || totalJsonChars + f.size > MAX_TOTAL_JSON_CHARS) throw new Error('JSON file is too large.');
           const text = await f.text();
+          if(text.length > MAX_JSON_CHARS || totalJsonChars + text.length > MAX_TOTAL_JSON_CHARS) throw new Error('JSON data is too large.');
+          totalJsonChars += text.length;
           const parsed = JSON.parse(text);
           if(Array.isArray(parsed)) rawEntries.push(...parsed);
         } catch(err){ /* skip */ }
@@ -653,7 +672,7 @@
 
       const msPlayed = e.msPlayed ?? e.ms_played;
       const timeStr  = e.endTime ?? e.ts;
-      if(msPlayed == null || !timeStr) continue;
+      if(msPlayed == null || !timeStr || typeof timeStr !== 'string') continue;
 
       const track   = e.trackName ?? e.master_metadata_track_name ?? null;
       const artist  = e.artistName ?? e.master_metadata_album_artist_name ?? null;

@@ -654,6 +654,11 @@
 
   const MAX_CLIP_FILE_BYTES = 2 * 1024 * 1024 * 1024; // 2 GiB
   const MAX_WAVEFORM_FILE_BYTES = 256 * 1024 * 1024; // 256 MiB
+  const MAX_OVERLAY_FILE_BYTES = 2 * 1024 * 1024 * 1024; // 2 GiB
+  const MAX_EXPORT_WIDTH = 3840;
+  const MAX_EXPORT_HEIGHT = 2160;
+  const MAX_TIMELINE_SECONDS = 60 * 60;
+  let exportObjectUrl = null;
   const uid = () => Math.random().toString(36).slice(2, 10);
   const randomSuffix = (len) => {
     const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
@@ -752,11 +757,12 @@
   }
 
   async function generateWaveform(clip) {
+    let actx = null;
     try {
       if (clip.file.size > MAX_WAVEFORM_FILE_BYTES) { clip.waveform = false; renderTimeline(); return; }
       const buf = await clip.file.arrayBuffer();
       const AC = window.AudioContext || window.webkitAudioContext;
-      const actx = new AC();
+      actx = new AC();
       const audioBuf = await actx.decodeAudioData(buf.slice(0));
       const raw = audioBuf.getChannelData(0);
       const samples = 400;
@@ -772,6 +778,8 @@
       actx.close();
     } catch (e) {
       clip.waveform = false; // decode failed or no audio track
+    } finally {
+      if (actx) { try { await actx.close(); } catch (e) {} }
     }
     renderTimeline();
   }
@@ -1299,9 +1307,30 @@
     if (e.target.type === 'checkbox') val = e.target.checked;
     else if (e.target.type === 'number' || e.target.type === 'range') {
       val = parseFloat(e.target.value);
-      if (isNaN(val)) val = 0;
+      if (!Number.isFinite(val)) val = 0;
     } else val = e.target.value;
+
+    if (typeof val === 'number') {
+      if (prop === 'x' || prop === 'y') val = Math.max(0, Math.min(1, val));
+      else if (prop === 'scale') val = Math.max(0.05, Math.min(5, val));
+      else if (prop === 'opacity' || prop === 'bg.opacity' || prop === 'volume') val = Math.max(0, Math.min(1, val));
+      else if (prop === 'fontSize') val = Math.max(6, Math.min(256, val));
+      else if (prop === 'bg.radius' || prop === 'bg.padX' || prop === 'bg.padY') val = Math.max(0, Math.min(512, val));
+      else if (prop === 'start') val = Math.max(0, Math.min(MAX_TIMELINE_SECONDS, val));
+      else if (prop === 'duration') val = Math.max(0.1, Math.min(MAX_TIMELINE_SECONDS, val));
+      else if (prop === 'inPoint' || prop === 'outPoint') val = Math.max(0, Math.min(MAX_TIMELINE_SECONDS, val));
+      else if (prop === 'rotate') val = Math.max(-36000, Math.min(36000, val));
+    }
     target[leaf] = val;
+
+    if (prop === 'duration') {
+      const maxEnd = Math.min(MAX_TIMELINE_SECONDS, ov.start + ov.duration);
+      ov.duration = Math.max(0.1, Math.min(MAX_TIMELINE_SECONDS - ov.start, ov.duration));
+      ov.outPoint = Math.min(ov.outPoint ?? ov.duration, ov.duration);
+    }
+    if (prop === 'start') ov.start = Math.max(0, Math.min(MAX_TIMELINE_SECONDS - Math.max(0.1, ov.duration), ov.start));
+    if (prop === 'inPoint') ov.inPoint = Math.max(0, Math.min(ov.outPoint - 0.05, ov.inPoint));
+    if (prop === 'outPoint') ov.outPoint = Math.max(ov.inPoint + 0.05, Math.min(ov.duration, ov.outPoint));
     if (KF_PROPS.indexOf(prop) >= 0 && (ov.autoKey || (ov.anims && ov.anims[prop] && ov.anims[prop].length))) {
       const lt = Math.max(0, Math.min(ov.duration, virtualTime - ov.start));
       upsertKeyframe(ov, prop, lt, val);
@@ -1341,6 +1370,7 @@
   ovImageInput.addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if (!file) return;
+    if (file.size > MAX_OVERLAY_FILE_BYTES) { alert('Overlay file is larger than 2 GiB.'); e.target.value = ''; return; }
     const url = URL.createObjectURL(file);
     addOverlay('image', { url, file, name: file.name, duration: OV_DEFAULT_DUR.image });
     ovImageInput.value = '';
@@ -1348,6 +1378,7 @@
   ovVideoInput.addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if (!file) return;
+    if (file.size > MAX_OVERLAY_FILE_BYTES) { alert('Overlay file is larger than 2 GiB.'); e.target.value = ''; return; }
     const url = URL.createObjectURL(file);
     const dur = await probeDuration(url, 'video');
     addOverlay('video', { url, file, name: file.name, duration: dur, inPoint: 0, outPoint: dur });
@@ -1356,6 +1387,7 @@
   ovAudioInput.addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if (!file) return;
+    if (file.size > MAX_OVERLAY_FILE_BYTES) { alert('Overlay file is larger than 2 GiB.'); e.target.value = ''; return; }
     const url = URL.createObjectURL(file);
     const dur = await probeDuration(url, 'audio');
     addOverlay('audio', { url, file, name: file.name, duration: dur, inPoint: 0, outPoint: dur, volume: 1 });
@@ -1590,7 +1622,8 @@
 
   function deleteClip(id) {
     const doomed = clips.find(c => c.id === id);
-    if (doomed?.url) { try { URL.revokeObjectURL(doomed.url); } catch(e) {} }
+    const stillUsed = doomed && clips.some(c => c.id !== id && c.url === doomed.url);
+    if (doomed?.url && !stillUsed) { try { URL.revokeObjectURL(doomed.url); } catch(e) {} }
     clips = clips.filter(c => c.id !== id);
     if (selectedId === id) selectedId = clips[0]?.id || null;
     if (!clips.length) { workspace.classList.remove('active'); dropzone.style.display='flex'; }
@@ -1878,6 +1911,8 @@
       let targetH = clips[0]?.height || 720;
       clips.forEach(c => { if ((c.width||0) * (c.height||0) > targetW * targetH) { targetW = c.width; targetH = c.height; } });
       // even dimensions only — libx264 requires them
+      targetW = Math.min(Math.max(2, targetW), MAX_EXPORT_WIDTH);
+      targetH = Math.min(Math.max(2, targetH), MAX_EXPORT_HEIGHT);
       targetW = targetW % 2 === 0 ? targetW : targetW - 1;
       targetH = targetH % 2 === 0 ? targetH : targetH - 1;
       const normalizeVf = `scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease,pad=${targetW}:${targetH}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=${targetFps},format=yuv420p`;
@@ -1949,9 +1984,10 @@
 
       const data = ff.FS('readFile', outName);
       const blob = new Blob([data.buffer], { type: 'video/mp4' });
-      const url = URL.createObjectURL(blob);
+      if (exportObjectUrl) { try { URL.revokeObjectURL(exportObjectUrl); } catch (e) {} }
+      exportObjectUrl = URL.createObjectURL(blob);
       const filename = `kerf-export-${randomSuffix(8)}.mp4`;
-      downloadLink.href = url;
+      downloadLink.href = exportObjectUrl;
       downloadLink.download = filename;
       resultWrap.classList.add('active');
       progressLabel.textContent = 'Done.';
@@ -2044,7 +2080,12 @@
     const baseUrl = URL.createObjectURL(new Blob([baseData.buffer], { type: 'video/mp4' }));
     const baseVid = document.createElement('video');
     baseVid.src = baseUrl; baseVid.muted = true; baseVid.playsInline = true;
-    await new Promise((res, rej) => { baseVid.onloadedmetadata = res; baseVid.onerror = rej; });
+    try {
+      await new Promise((res, rej) => { baseVid.onloadedmetadata = res; baseVid.onerror = rej; });
+    } catch (e) {
+      try { URL.revokeObjectURL(baseUrl); } catch (ignore) {}
+      throw e;
+    }
     try { await baseVid.play(); } catch(e) { try { URL.revokeObjectURL(baseUrl); } catch(ignore) {} throw new Error('Unable to start source video for overlay export.'); }
 
     const media = {};
@@ -2103,7 +2144,10 @@
   }
 
   downloadLink.addEventListener('click', () => {
-    setTimeout(() => resultWrap.classList.remove('active'), 3000);
+    setTimeout(() => {
+      resultWrap.classList.remove('active');
+      if (exportObjectUrl) { try { URL.revokeObjectURL(exportObjectUrl); } catch (e) {} exportObjectUrl = null; }
+    }, 5000);
   });
 
   function extOf(name) {

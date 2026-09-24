@@ -1,0 +1,1114 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ClipForge</title>
+
+<style>
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    min-height: 100vh;
+    font-family: Inter, Arial, sans-serif;
+    background: #09090d;
+    color: white;
+}
+
+.app {
+    max-width: 1200px;
+    margin: auto;
+    padding: 30px 20px 50px;
+}
+
+header {
+    margin-bottom: 28px;
+}
+
+.logo {
+    font-size: 32px;
+    font-weight: 800;
+    letter-spacing: -1px;
+}
+
+.logo span {
+    color: #9b5cff;
+}
+
+.subtitle {
+    color: #888894;
+    margin-top: 5px;
+}
+
+.layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 420px;
+    gap: 28px;
+}
+
+.panel {
+    background: #111117;
+    border: 1px solid #25252e;
+    border-radius: 18px;
+    padding: 20px;
+}
+
+h2 {
+    margin-top: 0;
+    font-size: 18px;
+}
+
+label {
+    display: block;
+    font-size: 13px;
+    color: #aaaab5;
+    margin: 17px 0 7px;
+}
+
+textarea {
+    width: 100%;
+    min-height: 260px;
+    resize: vertical;
+    background: #09090d;
+    color: white;
+    border: 1px solid #30303b;
+    border-radius: 12px;
+    padding: 14px;
+    font-size: 15px;
+    line-height: 1.5;
+    outline: none;
+}
+
+textarea:focus {
+    border-color: #8b4dff;
+}
+
+input[type="file"],
+select {
+    width: 100%;
+    background: #09090d;
+    color: white;
+    border: 1px solid #30303b;
+    border-radius: 10px;
+    padding: 11px;
+}
+
+.row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+}
+
+input[type="range"] {
+    width: 100%;
+}
+
+.value {
+    float: right;
+    color: #9b5cff;
+}
+
+button {
+    width: 100%;
+    border: 0;
+    border-radius: 12px;
+    padding: 13px 16px;
+    margin-top: 14px;
+    font-weight: 700;
+    font-size: 15px;
+    cursor: pointer;
+    background: #9b5cff;
+    color: white;
+    transition: .15s;
+}
+
+button:hover {
+    background: #ad78ff;
+    transform: translateY(-1px);
+}
+
+button.secondary {
+    background: #20202a;
+}
+
+button.secondary:hover {
+    background: #2b2b37;
+}
+
+button:disabled {
+    opacity: .5;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.preview-wrap {
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+}
+
+.preview {
+    position: relative;
+    width: min(100%, 360px);
+    aspect-ratio: 9 / 16;
+    background: black;
+    overflow: hidden;
+    border-radius: 18px;
+    box-shadow: 0 20px 70px rgba(0,0,0,.5);
+}
+
+#previewCanvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+.status {
+    margin-top: 15px;
+    color: #888894;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.progress {
+    height: 5px;
+    background: #22222b;
+    border-radius: 99px;
+    margin-top: 12px;
+    overflow: hidden;
+}
+
+.progress div {
+    height: 100%;
+    width: 0%;
+    background: #9b5cff;
+}
+
+.notice {
+    background: #17171f;
+    border: 1px solid #292934;
+    border-radius: 10px;
+    padding: 12px;
+    color: #aaaab5;
+    font-size: 12px;
+    margin-top: 14px;
+}
+
+@media(max-width: 850px) {
+    .layout {
+        grid-template-columns: 1fr;
+    }
+
+    .preview-wrap {
+        order: -1;
+    }
+
+    .preview {
+        width: min(85vw, 360px);
+    }
+}
+</style>
+</head>
+
+<body>
+
+<div class="app">
+
+<header>
+    <div class="logo">Clip<span>Forge</span></div>
+    <div class="subtitle">
+        Turn stories into short-form videos.
+    </div>
+</header>
+
+<div class="layout">
+
+<section class="panel">
+
+<h2>🎬 Create your Short</h2>
+
+<label>Story / Reddit post</label>
+
+<textarea id="story" placeholder="Paste your Reddit story here...
+
+Example:
+
+What is the weirdest thing that happened to you at school?
+
+I once walked into the wrong classroom...
+"></textarea>
+
+<label>Background image / video</label>
+<input
+    id="background"
+    type="file"
+    accept="image/*,video/mp4,video/webm"
+>
+
+<div class="row">
+
+<div>
+<label>Style</label>
+<select id="style">
+    <option value="dark">Dark</option>
+    <option value="purple">Purple</option>
+    <option value="clean">Clean</option>
+</select>
+</div>
+
+<div>
+<label>Scene duration</label>
+<select id="duration">
+    <option value="2">2 seconds</option>
+    <option value="3" selected>3 seconds</option>
+    <option value="4">4 seconds</option>
+</select>
+</div>
+
+</div>
+
+<label>
+    Background dimming
+    <span class="value" id="dimValue">45%</span>
+</label>
+
+<input
+    id="dim"
+    type="range"
+    min="0"
+    max="80"
+    value="45"
+>
+
+<label>Background fit</label>
+
+<select id="fit">
+    <option value="cover" selected>Cover</option>
+    <option value="contain">Contain</option>
+</select>
+
+<button id="previewBtn">
+    ▶ Preview
+</button>
+
+<button id="exportBtn">
+    📥 Export WebM
+</button>
+
+<button id="clearBtn" class="secondary">
+    Clear
+</button>
+
+<div class="notice">
+    💡 Eksport działa bez serwera i bez FFmpeg. Wynik to WebM,
+    który możesz później przekonwertować do MP4.
+</div>
+
+</section>
+
+
+<section class="preview-wrap">
+
+<div>
+
+<div class="preview">
+    <canvas id="previewCanvas" width="720" height="1280"></canvas>
+</div>
+
+<div class="progress">
+    <div id="progressBar"></div>
+</div>
+
+<div class="status" id="status">
+    Paste a story and press Preview.
+</div>
+
+</div>
+
+</section>
+
+</div>
+</div>
+
+
+<script>
+
+const canvas = document.getElementById("previewCanvas");
+const ctx = canvas.getContext("2d");
+
+const storyInput = document.getElementById("story");
+const backgroundInput = document.getElementById("background");
+const styleInput = document.getElementById("style");
+const durationInput = document.getElementById("duration");
+const dimInput = document.getElementById("dim");
+const dimValue = document.getElementById("dimValue");
+const fitInput = document.getElementById("fit");
+
+const previewBtn = document.getElementById("previewBtn");
+const exportBtn = document.getElementById("exportBtn");
+const clearBtn = document.getElementById("clearBtn");
+
+const status = document.getElementById("status");
+const progressBar = document.getElementById("progressBar");
+
+let background = null;
+let backgroundType = null;
+let backgroundURL = null;
+
+let scenes = [];
+let playing = false;
+let animationFrame = null;
+
+let video = null;
+
+dimInput.addEventListener("input", () => {
+    dimValue.textContent = dimInput.value + "%";
+});
+
+
+function splitText(text) {
+
+    text = text
+        .replace(/\r/g, "")
+        .replace(/\n+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+
+    if (!text) return [];
+
+    const words = text.split(" ");
+    const result = [];
+
+    let current = "";
+
+    for (const word of words) {
+
+        if ((current + " " + word).trim().length > 95) {
+            if (current.trim()) {
+                result.push(current.trim());
+            }
+
+            current = word;
+        } else {
+            current += " " + word;
+        }
+    }
+
+    if (current.trim()) {
+        result.push(current.trim());
+    }
+
+    return result;
+}
+
+
+function roundedRect(ctx, x, y, w, h, r) {
+
+    ctx.beginPath();
+
+    ctx.moveTo(x + r, y);
+
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+
+    ctx.closePath();
+}
+
+
+function wrapText(text, maxWidth, fontSize) {
+
+    ctx.font = `700 ${fontSize}px Arial`;
+
+    const words = text.split(" ");
+    const lines = [];
+    let line = "";
+
+    for (const word of words) {
+
+        const test = line
+            ? line + " " + word
+            : word;
+
+        if (ctx.measureText(test).width > maxWidth) {
+
+            if (line) {
+                lines.push(line);
+            }
+
+            line = word;
+
+        } else {
+            line = test;
+        }
+    }
+
+    if (line) {
+        lines.push(line);
+    }
+
+    return lines;
+}
+
+
+function drawBackground() {
+
+    ctx.fillStyle = "#08080c";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    if (!background) return;
+
+    const source = background;
+
+    let sw;
+    let sh;
+
+    if (backgroundType === "video") {
+        sw = source.videoWidth;
+        sh = source.videoHeight;
+    } else {
+        sw = source.width;
+        sh = source.height;
+    }
+
+    if (!sw || !sh) return;
+
+    const cw = canvas.width;
+    const ch = canvas.height;
+
+    const scale = fitInput.value === "cover"
+        ? Math.max(cw / sw, ch / sh)
+        : Math.min(cw / sw, ch / sh);
+
+    const w = sw * scale;
+    const h = sh * scale;
+
+    const x = (cw - w) / 2;
+    const y = (ch - h) / 2;
+
+    ctx.drawImage(source, x, y, w, h);
+
+    const dim = Number(dimInput.value) / 100;
+
+    ctx.fillStyle = `rgba(0,0,0,${dim})`;
+    ctx.fillRect(0, 0, cw, ch);
+}
+
+
+function drawScene(index, progress = 0) {
+
+    drawBackground();
+
+    if (!scenes.length) {
+
+        ctx.fillStyle = "rgba(0,0,0,.45)";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.fillStyle = "white";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.font = "700 42px Arial";
+
+        ctx.fillText(
+            "Your story goes here",
+            canvas.width / 2,
+            canvas.height / 2
+        );
+
+        return;
+    }
+
+    const text = scenes[index];
+
+    let fontSize = 52;
+
+    if (text.length > 120) fontSize = 44;
+    if (text.length > 170) fontSize = 38;
+
+    let textColor = "#ffffff";
+    let boxColor = "rgba(0,0,0,.60)";
+
+    if (styleInput.value === "purple") {
+        boxColor = "rgba(75,35,120,.75)";
+    }
+
+    if (styleInput.value === "clean") {
+        textColor = "#111111";
+        boxColor = "rgba(255,255,255,.88)";
+    }
+
+    const maxWidth = canvas.width - 100;
+
+    const lines = wrapText(
+        text,
+        maxWidth - 60,
+        fontSize
+    );
+
+    const lineHeight = fontSize * 1.18;
+
+    const boxHeight =
+        lines.length * lineHeight + 70;
+
+    const boxWidth = Math.min(
+        canvas.width - 70,
+        maxWidth
+    );
+
+    const boxX =
+        (canvas.width - boxWidth) / 2;
+
+    const boxY =
+        (canvas.height - boxHeight) / 2;
+
+    ctx.fillStyle = boxColor;
+
+    roundedRect(
+        ctx,
+        boxX,
+        boxY,
+        boxWidth,
+        boxHeight,
+        28
+    );
+
+    ctx.fill();
+
+    ctx.fillStyle = textColor;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = `700 ${fontSize}px Arial`;
+
+    let y =
+        boxY +
+        boxHeight / 2 -
+        ((lines.length - 1) * lineHeight) / 2;
+
+    for (const line of lines) {
+
+        ctx.fillText(
+            line,
+            canvas.width / 2,
+            y
+        );
+
+        y += lineHeight;
+    }
+
+
+    // top label
+
+    ctx.fillStyle =
+        styleInput.value === "clean"
+        ? "#111"
+        : "#fff";
+
+    ctx.globalAlpha = .8;
+
+    ctx.font = "600 25px Arial";
+
+    ctx.fillText(
+        "r/AskReddit • ClipForge",
+        canvas.width / 2,
+        70
+    );
+
+    ctx.globalAlpha = 1;
+
+
+    // progress bar
+
+    const barWidth = canvas.width - 80;
+
+    ctx.fillStyle =
+        styleInput.value === "purple"
+        ? "#b06cff"
+        : "#ffffff";
+
+    ctx.globalAlpha = .8;
+
+    ctx.fillRect(
+        40,
+        canvas.height - 45,
+        barWidth * progress,
+        6
+    );
+
+    ctx.globalAlpha = 1;
+}
+
+
+backgroundInput.addEventListener("change", () => {
+
+    const file = backgroundInput.files[0];
+
+    if (!file) return;
+
+    if (backgroundURL) {
+        URL.revokeObjectURL(backgroundURL);
+    }
+
+    backgroundURL = URL.createObjectURL(file);
+
+    if (file.type.startsWith("video/")) {
+
+        backgroundType = "video";
+
+        video = document.createElement("video");
+
+        video.src = backgroundURL;
+        video.muted = true;
+        video.loop = true;
+        video.playsInline = true;
+
+        video.addEventListener("loadeddata", () => {
+
+            background = video;
+
+            status.textContent =
+                "Video background loaded.";
+
+            drawScene(0);
+
+        });
+
+    } else {
+
+        backgroundType = "image";
+
+        const img = new Image();
+
+        img.onload = () => {
+
+            background = img;
+
+            status.textContent =
+                "Image background loaded.";
+
+            drawScene(0);
+        };
+
+        img.src = backgroundURL;
+    }
+});
+
+
+function prepareScenes() {
+
+    scenes = splitText(
+        storyInput.value
+    );
+
+    if (!scenes.length) {
+
+        status.textContent =
+            "Paste some text first.";
+
+        return false;
+    }
+
+    return true;
+}
+
+
+async function playPreview() {
+
+    if (!prepareScenes()) return;
+
+    if (playing) return;
+
+    playing = true;
+
+    previewBtn.disabled = true;
+
+    if (backgroundType === "video" && video) {
+
+        video.currentTime = 0;
+
+        try {
+            await video.play();
+        } catch {}
+    }
+
+    const sceneDuration =
+        Number(durationInput.value) * 1000;
+
+    const startTime = performance.now();
+
+    function frame(now) {
+
+        if (!playing) return;
+
+        const elapsed =
+            now - startTime;
+
+        const totalDuration =
+            scenes.length * sceneDuration;
+
+        if (elapsed >= totalDuration) {
+
+            playing = false;
+
+            previewBtn.disabled = false;
+
+            if (video) video.pause();
+
+            drawScene(
+                scenes.length - 1,
+                1
+            );
+
+            progressBar.style.width = "100%";
+
+            status.textContent =
+                "Preview finished.";
+
+            return;
+        }
+
+        const sceneIndex =
+            Math.floor(elapsed / sceneDuration);
+
+        const sceneProgress =
+            (elapsed % sceneDuration) /
+            sceneDuration;
+
+        drawScene(
+            sceneIndex,
+            sceneProgress
+        );
+
+        progressBar.style.width =
+            `${(elapsed / totalDuration) * 100}%`;
+
+        status.textContent =
+            `Scene ${sceneIndex + 1} / ${scenes.length}`;
+
+        animationFrame =
+            requestAnimationFrame(frame);
+    }
+
+    animationFrame =
+        requestAnimationFrame(frame);
+}
+
+
+previewBtn.addEventListener(
+    "click",
+    playPreview
+);
+
+
+function stopPreview() {
+
+    playing = false;
+
+    if (animationFrame) {
+        cancelAnimationFrame(animationFrame);
+    }
+
+    if (video) {
+        video.pause();
+    }
+
+    previewBtn.disabled = false;
+}
+
+
+async function exportVideo() {
+
+    if (location.protocol === "file:") {
+
+        alert(
+            "Otwórz stronę przez GitHub Pages lub inny serwer HTTPS. Eksport nie działa poprawnie z file://."
+        );
+
+        return;
+    }
+
+    if (!prepareScenes()) return;
+
+    stopPreview();
+
+    exportBtn.disabled = true;
+
+    status.textContent =
+        "Rendering video...";
+
+    progressBar.style.width = "0%";
+
+
+    const fps = 30;
+
+    const stream =
+        canvas.captureStream(fps);
+
+    let mimeType = "";
+
+    const formats = [
+        "video/webm;codecs=vp9",
+        "video/webm;codecs=vp8",
+        "video/webm"
+    ];
+
+    for (const format of formats) {
+
+        if (MediaRecorder.isTypeSupported(format)) {
+
+            mimeType = format;
+            break;
+        }
+    }
+
+    if (!mimeType) {
+
+        alert(
+            "Twoja przeglądarka nie obsługuje eksportu WebM."
+        );
+
+        exportBtn.disabled = false;
+
+        return;
+    }
+
+
+    const recorder =
+        new MediaRecorder(
+            stream,
+            {
+                mimeType,
+                videoBitsPerSecond: 8_000_000
+            }
+        );
+
+    const chunks = [];
+
+    recorder.ondataavailable = event => {
+
+        if (event.data.size > 0) {
+            chunks.push(event.data);
+        }
+    };
+
+
+    const finished =
+        new Promise(resolve => {
+
+            recorder.onstop = resolve;
+
+        });
+
+
+    recorder.start();
+
+
+    if (backgroundType === "video" && video) {
+
+        video.currentTime = 0;
+
+        try {
+            await video.play();
+        } catch {}
+    }
+
+
+    const sceneDuration =
+        Number(durationInput.value) * 1000;
+
+    const totalDuration =
+        scenes.length * sceneDuration;
+
+    const startTime =
+        performance.now();
+
+
+    await new Promise(resolve => {
+
+        function render(now) {
+
+            const elapsed =
+                now - startTime;
+
+            if (elapsed >= totalDuration) {
+
+                drawScene(
+                    scenes.length - 1,
+                    1
+                );
+
+                progressBar.style.width = "100%";
+
+                resolve();
+
+                return;
+            }
+
+            const sceneIndex =
+                Math.floor(
+                    elapsed / sceneDuration
+                );
+
+            const sceneProgress =
+                (elapsed % sceneDuration) /
+                sceneDuration;
+
+            drawScene(
+                sceneIndex,
+                sceneProgress
+            );
+
+            progressBar.style.width =
+                `${(elapsed / totalDuration) * 100}%`;
+
+            status.textContent =
+                `Rendering ${Math.round(
+                    (elapsed / totalDuration) * 100
+                )}%`;
+
+            requestAnimationFrame(render);
+        }
+
+        requestAnimationFrame(render);
+
+    });
+
+
+    if (video) {
+        video.pause();
+    }
+
+    recorder.stop();
+
+    await finished;
+
+
+    const blob =
+        new Blob(
+            chunks,
+            {
+                type: mimeType
+            }
+        );
+
+
+    const url =
+        URL.createObjectURL(blob);
+
+    const a =
+        document.createElement("a");
+
+    a.href = url;
+
+    a.download =
+        "clipforge-short.webm";
+
+    document.body.appendChild(a);
+
+    a.click();
+
+    a.remove();
+
+    setTimeout(() => {
+        URL.revokeObjectURL(url);
+    }, 1000);
+
+
+    status.textContent =
+        "✅ Video exported successfully.";
+
+    progressBar.style.width = "100%";
+
+    exportBtn.disabled = false;
+}
+
+
+exportBtn.addEventListener(
+    "click",
+    exportVideo
+);
+
+
+clearBtn.addEventListener(
+    "click",
+    () => {
+
+        stopPreview();
+
+        storyInput.value = "";
+
+        backgroundInput.value = "";
+
+        scenes = [];
+
+        background = null;
+
+        backgroundType = null;
+
+        if (backgroundURL) {
+            URL.revokeObjectURL(backgroundURL);
+            backgroundURL = null;
+        }
+
+        video = null;
+
+        progressBar.style.width = "0%";
+
+        status.textContent =
+            "Paste a story and press Preview.";
+
+        drawScene(0);
+
+    }
+);
+
+
+storyInput.addEventListener(
+    "input",
+    () => {
+
+        if (!playing) {
+            prepareScenes();
+
+            if (scenes.length) {
+                drawScene(0);
+            }
+        }
+
+    }
+);
+
+
+styleInput.addEventListener(
+    "change",
+    () => {
+
+        if (!playing) {
+            drawScene(0);
+        }
+
+    }
+);
+
+
+fitInput.addEventListener(
+    "change",
+    () => {
+
+        if (!playing) {
+            drawScene(0);
+        }
+
+    }
+);
+
+
+drawScene(0);
+
+</script>
+
+</body>
+</html>

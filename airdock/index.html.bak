@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -844,14 +844,9 @@
     if(msg.type==='chunk'){
       if(!isValidTransferId(msg.id))return;
       const m=incomingMeta[msg.id]; if(!m||m.completed)return;
-      const chunk = msg.data instanceof ArrayBuffer
-        ? msg.data
-        : (ArrayBuffer.isView(msg.data)
-          ? msg.data.buffer.slice(msg.data.byteOffset, msg.data.byteOffset + msg.data.byteLength)
-          : null);
-      if(!chunk || chunk.byteLength===0 || chunk.byteLength>CHUNK_SIZE){abortIncomingTransfer(msg.id);toast('Invalid transfer chunk');return;}
-      if(m.received+chunk.byteLength>m.size){abortIncomingTransfer(msg.id);toast('Transfer exceeded declared size');return;}
-      m.chunks.push(chunk); m.received+=chunk.byteLength;
+      if(!(msg.data instanceof ArrayBuffer)||msg.data.byteLength===0||msg.data.byteLength>CHUNK_SIZE){abortIncomingTransfer(msg.id);toast('Invalid transfer chunk');return;}
+      if(m.received+msg.data.byteLength>m.size){abortIncomingTransfer(msg.id);toast('Transfer exceeded declared size');return;}
+      m.chunks.push(msg.data); m.received+=msg.data.byteLength;
       m.lastActivity = Date.now();
       armIncomingTimeout(msg.id, INCOMING_TIMEOUT_MS);
       const pct=m.size===0?100:Math.min(100,Math.round(m.received/m.size*100));

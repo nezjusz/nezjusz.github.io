@@ -13,10 +13,10 @@
    ============================================================ */
 
 const CONFIG = {
-  DB_NAME: 'UndertaleWebPlayer',
+  DB_NAME: "UndertaleWebPlayer",
   DB_VERSION: 1,
-  STORE_NAME: 'gameFiles',
-  WASM_URL: './butterscotch.mjs',
+  STORE_NAME: "gameFiles",
+  WASM_URL: "./butterscotch.mjs",
   // Alternatywnie: localny plik ./butterscotch.mjs
 };
 
@@ -29,7 +29,7 @@ let gameRunning = false;
    1. DIAGNOSTYKA – przechwytywanie logów
    ============================================================ */
 
-const logOutput = document.getElementById('log-output');
+const logOutput = document.getElementById("log-output");
 const MAX_LOG_LINES = 200;
 const logLines = [];
 
@@ -39,17 +39,17 @@ const logLines = [];
  */
 function screenLog(...args) {
   const text = args
-    .map(a => (typeof a === 'string' ? a : JSON.stringify(a, null, 2)))
-    .join(' ');
+    .map((a) => (typeof a === "string" ? a : JSON.stringify(a, null, 2)))
+    .join(" ");
 
-  const lines = text.split('\n');
+  const lines = text.split("\n");
   for (const line of lines) {
     logLines.push(line);
   }
   // Ogranicz liczbę linii
   while (logLines.length > MAX_LOG_LINES) logLines.shift();
 
-  logOutput.textContent = logLines.join('\n');
+  logOutput.textContent = logLines.join("\n");
   logOutput.scrollTop = logOutput.scrollHeight;
 }
 
@@ -61,21 +61,21 @@ function interceptConsole() {
 
   console.log = (...args) => {
     originalLog(...args);
-    screenLog('[LOG]', ...args);
+    screenLog("[LOG]", ...args);
   };
   console.error = (...args) => {
     originalError(...args);
-    screenLog('[ERR]', ...args);
+    screenLog("[ERR]", ...args);
   };
   console.warn = (...args) => {
     originalWarn(...args);
-    screenLog('[WRN]', ...args);
+    screenLog("[WRN]", ...args);
   };
 }
 
-document.getElementById('clear-log').addEventListener('click', () => {
+document.getElementById("clear-log").addEventListener("click", () => {
   logLines.length = 0;
-  logOutput.textContent = '';
+  logOutput.textContent = "";
 });
 
 /* ============================================================
@@ -93,7 +93,7 @@ function openDB() {
     request.onupgradeneeded = (event) => {
       const db = event.target.result;
       if (!db.objectStoreNames.contains(CONFIG.STORE_NAME)) {
-        db.createObjectStore(CONFIG.STORE_NAME, { keyPath: 'name' });
+        db.createObjectStore(CONFIG.STORE_NAME, { keyPath: "name" });
       }
     };
 
@@ -111,7 +111,7 @@ function openDB() {
 async function saveFileToDB(name, data) {
   const db = await openDB();
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(CONFIG.STORE_NAME, 'readwrite');
+    const tx = db.transaction(CONFIG.STORE_NAME, "readwrite");
     const store = tx.objectStore(CONFIG.STORE_NAME);
     store.put({ name, data });
     tx.oncomplete = () => resolve();
@@ -126,7 +126,7 @@ async function saveFileToDB(name, data) {
 async function getAllFilesFromDB() {
   const db = await openDB();
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(CONFIG.STORE_NAME, 'readonly');
+    const tx = db.transaction(CONFIG.STORE_NAME, "readonly");
     const store = tx.objectStore(CONFIG.STORE_NAME);
     const request = store.getAll();
     request.onsuccess = () => resolve(request.result);
@@ -141,7 +141,7 @@ async function getAllFilesFromDB() {
 async function clearDB() {
   const db = await openDB();
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(CONFIG.STORE_NAME, 'readwrite');
+    const tx = db.transaction(CONFIG.STORE_NAME, "readwrite");
     tx.objectStore(CONFIG.STORE_NAME).clear();
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
@@ -156,7 +156,7 @@ async function clearDB() {
 async function deleteFileFromDB(name) {
   const db = await openDB();
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(CONFIG.STORE_NAME, 'readwrite');
+    const tx = db.transaction(CONFIG.STORE_NAME, "readwrite");
     tx.objectStore(CONFIG.STORE_NAME).delete(name);
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
@@ -167,23 +167,25 @@ async function deleteFileFromDB(name) {
    3. UPLOAD – Drag & Drop, input, JSZip
    ============================================================ */
 
-const dropZone = document.getElementById('drop-zone');
-const fileInput = document.getElementById('file-input');
-const folderInput = document.getElementById('folder-input');
-const fileListEl = document.getElementById('file-list');
-const fileListContainer = document.getElementById('file-list-container');
-const storageStatus = document.getElementById('storage-status');
+const dropZone = document.getElementById("drop-zone");
+const fileInput = document.getElementById("file-input");
+const folderInput = document.getElementById("folder-input");
+const fileListEl = document.getElementById("file-list");
+const fileListContainer = document.getElementById("file-list-container");
+const storageStatus = document.getElementById("storage-status");
 
 /** Sprawdza, czy plik jest akceptowalny (data.win / .ogg / .zip). */
 function isAcceptedFile(name) {
   const lower = name.toLowerCase();
-  return lower.endsWith('.win') || lower.endsWith('.ogg') || lower.endsWith('.zip');
+  return (
+    lower.endsWith(".win") || lower.endsWith(".ogg") || lower.endsWith(".zip")
+  );
 }
 
 /** Sprawdza, czy plik to data.win lub .ogg. */
 function isGameFile(name) {
   const lower = name.toLowerCase();
-  return lower === 'data.win' || lower.endsWith('.ogg');
+  return lower === "data.win" || lower.endsWith(".ogg");
 }
 
 /**
@@ -195,7 +197,7 @@ async function processFiles(files) {
   const zipFiles = [];
 
   for (const file of files) {
-    if (file.name.toLowerCase().endsWith('.zip')) {
+    if (file.name.toLowerCase().endsWith(".zip")) {
       zipFiles.push(file);
     } else if (isGameFile(file.name)) {
       accepted.push(file);
@@ -212,12 +214,12 @@ async function processFiles(files) {
         }
       });
     } catch (err) {
-      screenLog('[ERR] Błąd rozpakowywania ZIP:', err.message);
+      screenLog("[ERR] Błąd rozpakowywania ZIP:", err.message);
     }
   }
 
   if (accepted.length === 0) {
-    screenLog('[WRN] Nie znaleziono akceptowalnych plików (data.win / .ogg).');
+    screenLog("[WRN] Nie znaleziono akceptowalnych plików (data.win / .ogg).");
     return;
   }
 
@@ -226,7 +228,7 @@ async function processFiles(files) {
     try {
       let data;
       if (file._zipEntry) {
-        data = await file._zipEntry.async('blob');
+        data = await file._zipEntry.async("blob");
         const blob = new Blob([data]);
         await saveFileToDB(file.name, blob);
       } else {
@@ -246,20 +248,21 @@ async function refreshFileList() {
   const files = await getAllFilesFromDB();
 
   if (files.length === 0) {
-    fileListContainer.classList.add('hidden');
-    storageStatus.textContent = '';
+    fileListContainer.classList.add("hidden");
+    storageStatus.textContent = "";
     return;
   }
 
-  fileListContainer.classList.remove('hidden');
-  fileListEl.innerHTML = '';
+  fileListContainer.classList.remove("hidden");
+  fileListEl.innerHTML = "";
 
   for (const f of files) {
-    const li = document.createElement('li');
+    const li = document.createElement("li");
     const size = f.data instanceof Blob ? f.data.size : 0;
-    const sizeStr = size > 1024 * 1024
-      ? (size / (1024 * 1024)).toFixed(1) + ' MB'
-      : (size / 1024).toFixed(0) + ' KB';
+    const sizeStr =
+      size > 1024 * 1024
+        ? (size / (1024 * 1024)).toFixed(1) + " MB"
+        : (size / 1024).toFixed(0) + " KB";
 
     li.innerHTML = `
       <span class="file-name">${f.name}</span>
@@ -278,42 +281,42 @@ async function refreshFileList() {
 }
 
 /* --- Drag & Drop --- */
-['dragenter', 'dragover'].forEach(evt => {
+["dragenter", "dragover"].forEach((evt) => {
   dropZone.addEventListener(evt, (e) => {
     e.preventDefault();
     e.stopPropagation();
-    dropZone.classList.add('dragover');
+    dropZone.classList.add("dragover");
   });
 });
 
-['dragleave', 'drop'].forEach(evt => {
+["dragleave", "drop"].forEach((evt) => {
   dropZone.addEventListener(evt, (e) => {
     e.preventDefault();
     e.stopPropagation();
-    dropZone.classList.remove('dragover');
+    dropZone.classList.remove("dragover");
   });
 });
 
-dropZone.addEventListener('drop', (e) => {
+dropZone.addEventListener("drop", (e) => {
   const files = e.dataTransfer.files;
   if (files.length) processFiles(files);
 });
 
 /* --- Input file --- */
-fileInput.addEventListener('change', () => {
+fileInput.addEventListener("change", () => {
   if (fileInput.files.length) processFiles(fileInput.files);
-  fileInput.value = '';
+  fileInput.value = "";
 });
 
-folderInput.addEventListener('change', () => {
+folderInput.addEventListener("change", () => {
   if (folderInput.files.length) processFiles(folderInput.files);
-  folderInput.value = '';
+  folderInput.value = "";
 });
 
 /* --- Reset --- */
-document.getElementById('reset-btn').addEventListener('click', async () => {
+document.getElementById("reset-btn").addEventListener("click", async () => {
   await clearDB();
-  screenLog('[OK] Wyczyszczono IndexedDB.');
+  screenLog("[OK] Wyczyszczono IndexedDB.");
   await refreshFileList();
 });
 
@@ -327,10 +330,10 @@ document.getElementById('reset-btn').addEventListener('click', async () => {
  */
 async function copyFilesToOPFS() {
   const files = await getAllFilesFromDB();
-  if (files.length === 0) throw new Error('Brak plików w IndexedDB.');
+  if (files.length === 0) throw new Error("Brak plików w IndexedDB.");
 
   const root = await navigator.storage.getDirectory();
-  const gameDir = await root.getDirectoryHandle('game', { create: true });
+  const gameDir = await root.getDirectoryHandle("game", { create: true });
 
   for (const f of files) {
     const fileHandle = await gameDir.getFileHandle(f.name, { create: true });
@@ -340,8 +343,8 @@ async function copyFilesToOPFS() {
     screenLog(`[OPFS] Skopiowano: ${f.name}`);
   }
 
-  screenLog('[OPFS] Wszystkie pliki skopiowane.');
-  return '/game';
+  screenLog("[OPFS] Wszystkie pliki skopiowane.");
+  return "/game";
 }
 
 /**
@@ -352,59 +355,80 @@ async function startGame() {
   gameRunning = true;
 
   try {
-    screenLog('[WASM] Rozpoczynam ładowanie...');
+    screenLog("[WASM] Rozpoczynam ładowanie...");
 
     // 1. Przełącz ekran
-    document.getElementById('upload-screen').classList.remove('active');
-    document.getElementById('game-screen').classList.add('active');
+    document.getElementById("upload-screen").classList.remove("active");
+    document.getElementById("game-screen").classList.add("active");
 
     // 2. Pobierz canvas
-    canvas = document.getElementById('game-canvas');
+    canvas = document.getElementById("game-canvas");
 
     // 3. Kopiuj pliki do OPFS
     const opfsDir = await copyFilesToOPFS();
 
     // 4. Import modułu WASM
-    screenLog('[WASM] Importowanie modułu...');
+    screenLog("[WASM] Importowanie modułu...");
     const wasmModule = await import(/* @vite-ignore */ CONFIG.WASM_URL);
 
     // 5. Inicjalizacja modułu
-    screenLog('[WASM] Inicjalizacja...');
+    screenLog("[WASM] Inicjalizacja...");
+    // Wymuś utworzenie kontekstu WebGL 1.0 na canvasie
+    const gl = canvas.getContext("webgl", {
+      alpha: false,
+      depth: true,
+      stencil: true,
+      antialias: false,
+    });
+
+    if (!gl) {
+      screenLog("[ERR] Nie udało się utworzyć kontekstu WebGL 1.0!");
+      throw new Error("WebGL 1.0 nie jest dostępny.");
+    }
+    screenLog("[OK] Kontekst WebGL 1.0 utworzony pomyślnie.");
+
+    // Przekaż istniejący kontekst do modułu WASM
+    engineModule = await wasmModule.default({
+      canvas: canvas,
+      webglContext: gl, // <-- Dodaj tę linię
+      print: (text) => screenLog("[GAME]", text),
+      printErr: (text) => screenLog("[GAME-ERR]", text),
+    });
     engineModule = await wasmModule.default({
       canvas,
-      print: (text) => screenLog('[GAME]', text),
-      printErr: (text) => screenLog('[GAME-ERR]', text),
+      print: (text) => screenLog("[GAME]", text),
+      printErr: (text) => screenLog("[GAME-ERR]", text),
     });
 
     // 6. Montowanie OPFS
-    if (typeof engineModule._mountOpfs === 'function') {
-      screenLog('[WASM] Montowanie OPFS...');
+    if (typeof engineModule._mountOpfs === "function") {
+      screenLog("[WASM] Montowanie OPFS...");
       engineModule._mountOpfs(opfsDir);
     } else {
-      screenLog('[WRN] _mountOpfs niedostępne – używam domyślnego FS.');
+      screenLog("[WRN] _mountOpfs niedostępne – używam domyślnego FS.");
     }
 
     // 7. Uruchomienie runnera
-    if (typeof engineModule._startRunner === 'function') {
-      screenLog('[WASM] Uruchamianie runnera...');
+    if (typeof engineModule._startRunner === "function") {
+      screenLog("[WASM] Uruchamianie runnera...");
       engineModule._startRunner();
     } else {
-      screenLog('[ERR] _startRunner niedostępne!');
-      throw new Error('Brak funkcji _startRunner w module WASM.');
+      screenLog("[ERR] _startRunner niedostępne!");
+      throw new Error("Brak funkcji _startRunner w module WASM.");
     }
 
-    screenLog('[OK] Gra uruchomiona!');
+    screenLog("[OK] Gra uruchomiona!");
   } catch (err) {
-    screenLog('[ERR] Błąd uruchamiania:', err.message);
+    screenLog("[ERR] Błąd uruchamiania:", err.message);
     gameRunning = false;
 
     // Powrót do ekranu uploadu
-    document.getElementById('upload-screen').classList.add('active');
-    document.getElementById('game-screen').classList.remove('active');
+    document.getElementById("upload-screen").classList.add("active");
+    document.getElementById("game-screen").classList.remove("active");
   }
 }
 
-document.getElementById('start-btn').addEventListener('click', startGame);
+document.getElementById("start-btn").addEventListener("click", startGame);
 
 /* ============================================================
    5. STEROWANIE DOTYKOWE
@@ -415,7 +439,7 @@ document.getElementById('start-btn').addEventListener('click', startGame);
  * @param {string} key – wartość klawisza (np. 'ArrowUp', 'z')
  * @param {string} type – 'keydown' lub 'keyup'
  */
-function dispatchKeyEvent(key, type = 'keydown') {
+function dispatchKeyEvent(key, type = "keydown") {
   const event = new KeyboardEvent(type, {
     key,
     code: key.length === 1 ? `Key${key.toUpperCase()}` : key,
@@ -429,58 +453,58 @@ function dispatchKeyEvent(key, type = 'keydown') {
 /** Inicjalizuje sterowanie dotykowe. */
 function initTouchControls() {
   // Sprawdź, czy urządzenie ma ekran dotykowy
-  const hasTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
-  const touchControls = document.getElementById('touch-controls');
+  const hasTouch = "ontouchstart" in window || navigator.maxTouchPoints > 0;
+  const touchControls = document.getElementById("touch-controls");
 
   if (hasTouch) {
-    touchControls.classList.remove('hidden');
-    screenLog('[TOUCH] Sterowanie dotykowe aktywne.');
+    touchControls.classList.remove("hidden");
+    screenLog("[TOUCH] Sterowanie dotykowe aktywne.");
   }
 
   // D-Pad
-  document.querySelectorAll('.dpad-btn').forEach(btn => {
+  document.querySelectorAll(".dpad-btn").forEach((btn) => {
     const key = btn.dataset.key;
 
     const onStart = (e) => {
       e.preventDefault();
-      dispatchKeyEvent(key, 'keydown');
-      btn.classList.add('active');
+      dispatchKeyEvent(key, "keydown");
+      btn.classList.add("active");
     };
     const onEnd = (e) => {
       e.preventDefault();
-      dispatchKeyEvent(key, 'keyup');
-      btn.classList.remove('active');
+      dispatchKeyEvent(key, "keyup");
+      btn.classList.remove("active");
     };
 
-    btn.addEventListener('touchstart', onStart, { passive: false });
-    btn.addEventListener('touchend', onEnd);
-    btn.addEventListener('touchcancel', onEnd);
-    btn.addEventListener('mousedown', onStart);
-    btn.addEventListener('mouseup', onEnd);
-    btn.addEventListener('mouseleave', onEnd);
+    btn.addEventListener("touchstart", onStart, { passive: false });
+    btn.addEventListener("touchend", onEnd);
+    btn.addEventListener("touchcancel", onEnd);
+    btn.addEventListener("mousedown", onStart);
+    btn.addEventListener("mouseup", onEnd);
+    btn.addEventListener("mouseleave", onEnd);
   });
 
   // Przyciski akcji
-  document.querySelectorAll('.action-btn').forEach(btn => {
+  document.querySelectorAll(".action-btn").forEach((btn) => {
     const key = btn.dataset.key;
 
     const onStart = (e) => {
       e.preventDefault();
-      dispatchKeyEvent(key, 'keydown');
-      btn.classList.add('active');
+      dispatchKeyEvent(key, "keydown");
+      btn.classList.add("active");
     };
     const onEnd = (e) => {
       e.preventDefault();
-      dispatchKeyEvent(key, 'keyup');
-      btn.classList.remove('active');
+      dispatchKeyEvent(key, "keyup");
+      btn.classList.remove("active");
     };
 
-    btn.addEventListener('touchstart', onStart, { passive: false });
-    btn.addEventListener('touchend', onEnd);
-    btn.addEventListener('touchcancel', onEnd);
-    btn.addEventListener('mousedown', onStart);
-    btn.addEventListener('mouseup', onEnd);
-    btn.addEventListener('mouseleave', onEnd);
+    btn.addEventListener("touchstart", onStart, { passive: false });
+    btn.addEventListener("touchend", onEnd);
+    btn.addEventListener("touchcancel", onEnd);
+    btn.addEventListener("mousedown", onStart);
+    btn.addEventListener("mouseup", onEnd);
+    btn.addEventListener("mouseleave", onEnd);
   });
 }
 
@@ -488,9 +512,9 @@ function initTouchControls() {
    6. FULLSCREEN
    ============================================================ */
 
-document.addEventListener('keydown', (e) => {
+document.addEventListener("keydown", (e) => {
   // F11 / F dla fullscreen
-  if (e.key === 'f' || e.key === 'F' || e.key === 'F11') {
+  if (e.key === "f" || e.key === "F" || e.key === "F11") {
     if (!document.fullscreenElement) {
       document.documentElement.requestFullscreen().catch(() => {});
     } else {
@@ -505,7 +529,7 @@ document.addEventListener('keydown', (e) => {
 
 async function init() {
   interceptConsole();
-  screenLog('[INIT] Undertale Web Player gotowy.');
+  screenLog("[INIT] Undertale Web Player gotowy.");
   screenLog(`[INIT] IndexedDB: ${CONFIG.DB_NAME}`);
 
   // Wczytaj istniejące pliki
@@ -516,16 +540,16 @@ async function init() {
 
   // Sprawdź dostępność OPFS
   if (navigator.storage && navigator.storage.getDirectory) {
-    screenLog('[OK] OPFS dostępne.');
+    screenLog("[OK] OPFS dostępne.");
   } else {
-    screenLog('[WRN] OPFS niedostępne w tej przeglądarce.');
+    screenLog("[WRN] OPFS niedostępne w tej przeglądarce.");
   }
 
   // Sprawdź WebAssembly
-  if (typeof WebAssembly === 'object') {
-    screenLog('[OK] WebAssembly wspierane.');
+  if (typeof WebAssembly === "object") {
+    screenLog("[OK] WebAssembly wspierane.");
   } else {
-    screenLog('[ERR] WebAssembly NIE jest wspierane!');
+    screenLog("[ERR] WebAssembly NIE jest wspierane!");
   }
 }
 

@@ -1,290 +1,78 @@
 <!DOCTYPE html>
-<html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Undertale Web</title>
-<script src="coi-serviceworker.js"></script>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-<style>
-:root{--bg:#050508;--fg:#fff;--dim:#8a8a99;--acc:#ffe600;--red:#ff2a3c;--line:#fff;
---px:"Press Start 2P","Courier New",monospace;--tx:"VT323","Courier New",monospace}
-*{box-sizing:border-box}
-html,body{height:100%;margin:0}
-body{background:radial-gradient(ellipse at 50% 0,#14142a 0,var(--bg) 60%);color:var(--fg);font:22px/1.3 var(--tx);overflow-x:hidden}
-body::before{content:"";position:fixed;inset:0;background-image:radial-gradient(#fff 1px,transparent 1.5px),radial-gradient(#8af 1px,transparent 1.5px);background-size:120px 120px,190px 190px;background-position:0 0,60px 80px;opacity:.18;animation:drift 90s linear infinite;pointer-events:none}
-@keyframes drift{to{background-position:0 1200px,60px 1280px}}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
-main{position:relative;max-width:760px;margin:auto;padding:28px 16px 140px}
-header{text-align:center;margin-bottom:24px}
-h1{font:28px/1.4 var(--px);margin:12px 0 4px;letter-spacing:2px;text-shadow:3px 3px 0 #333}
-.sub{color:var(--dim)}
-.heart{width:44px;height:44px;image-rendering:pixelated;animation:beat 1.4s steps(2) infinite;filter:drop-shadow(0 0 10px var(--red))}
-@keyframes beat{50%{transform:scale(1.15)}}
-.box{border:4px solid var(--line);background:#000;padding:18px;margin:18px 0;position:relative}
-.box h2{font:13px/1.6 var(--px);color:var(--acc);margin:0 0 10px}
-.drop{border-style:dashed;text-align:center;cursor:pointer;transition:.15s}
-.drop.over,.drop:hover{border-color:var(--acc);background:#15140a}
-.btn{font:11px/1 var(--px);color:var(--fg);background:#000;border:3px solid var(--fg);padding:12px 14px;margin:5px 5px 5px 0;cursor:pointer;display:inline-block;text-transform:uppercase}
-.btn:hover,.btn:focus{color:var(--acc);border-color:var(--acc);outline:none}
-.btn.go{color:#000;background:var(--acc);border-color:var(--acc)}
-.btn[disabled]{opacity:.35;pointer-events:none}
-input[type=file]{display:none}
-#status{color:var(--dim);min-height:1.4em}
-.ok{color:#5f5}.err{color:var(--red)}.cached{color:var(--acc)}
-#stage{display:none}
-#stage.on{display:block}
-#gamewrap{position:relative;width:100%;background:#000}
-#screen{width:100%;aspect-ratio:4/3;background:#000;border:4px solid var(--fg);box-shadow:0 0 40px #4a4aff33;display:block;image-rendering:pixelated;outline:none}
-#gamewrap:fullscreen{width:100vw;height:100vh;display:flex;align-items:center;justify-content:center;background:#000}
-#gamewrap:fullscreen #screen{width:min(100vw,calc(100vh * 4 / 3));height:auto;aspect-ratio:4/3;border:none;box-shadow:none}
-.bar{margin-top:8px}
-#progress{display:none;width:100%;height:20px;background:#000;border:2px solid var(--fg);margin:10px 0;position:relative;overflow:hidden;--prog:0%}
-#progress.on{display:block}
-#progress::after{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--prog,0%);background:linear-gradient(90deg,var(--acc),#ff0,var(--acc));transition:width .15s linear;animation:pulse .8s infinite}
-#progress-text{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font:10px var(--px);z-index:1;color:#fff;text-shadow:1px 1px 0 #000,-1px -1px 0 #000}
-.cache-status{display:inline-block;padding:2px 6px;border:1px solid var(--dim);font-size:11px;color:var(--dim);margin-left:8px}
-.cache-status.ready{border-color:var(--acc);color:var(--acc)}
-#pad{display:none;position:absolute;left:0;right:0;bottom:0;padding:10px 14px;justify-content:space-between;align-items:flex-end;pointer-events:none;user-select:none;-webkit-user-select:none;touch-action:none;z-index:9}
-#pad.on{display:flex}
-#pad button{pointer-events:auto;touch-action:none;width:56px;height:56px;border-radius:50%;border:3px solid #fff;background:rgba(0,0,0,.65);color:#fff;font:14px var(--px)}
-#pad button:active,#pad button.d{background:var(--acc);color:#000;border-color:var(--acc)}
-.dp{display:grid;grid-template-columns:repeat(3,56px);gap:4px}
-.ab{display:flex;gap:8px;align-items:flex-end}
-.ab button:nth-child(2){margin-bottom:24px}
-footer{text-align:center;color:var(--dim);font-size:18px;margin-top:28px}
-#diag{white-space:pre-wrap;font:13px/1.35 "Courier New",monospace;background:#0a0a0a;border:2px solid #333;padding:10px;margin-top:10px;display:none;color:#ccc;max-height:400px;overflow:auto}
-#diag.on{display:block}
-#diag b{color:var(--acc)}
-@media(prefers-reduced-motion:reduce){*{animation:none!important}}
-</style></head><body>
-<main>
-<header>
- <svg class="heart" viewBox="0 0 9 8" shape-rendering="crispEdges"><path fill="#ff2a3c" d="M1 0h2v1h1v1h1V1h1V0h2v1h1v3H8v1H7v1H6v1H5v1H4V7H3V6H2V5H1V4H0V1h1z"/></svg>
- <h1>UNDERTALE</h1>
- <div class="sub">Web player · bring your own game files</div>
-</header>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#000000" />
+  <title>Undertale Web Player</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+</head>
+<body>
+  <div id="app">
+    <!-- ==== Ekran startowy / upload ==== -->
+    <section id="upload-screen" class="screen active">
+      <div class="logo">
+        <h1 class="retro-title">UNDERTALE</h1>
+        <p class="retro-subtitle">WEB PLAYER</p>
+      </div>
 
-<section id="setup">
- <div class="box drop" id="drop">
-  <h2>* Step 1: Your game files</h2>
-  Drop your Steam Undertale folder or a zip here,<br>or choose below. Only <b>data.win</b> and the <b>.ogg</b> files are used.<br>
-  <label class="btn">Folder<input id="dir" type="file" webkitdirectory multiple></label>
-  <label class="btn">Zip / files<input id="zip" type="file" multiple accept=".zip,.win,.ogg"></label>
-  <div id="progress"><div id="progress-text">0%</div></div>
-  <div id="status">Nothing loaded yet.<span id="cache" class="cache-status"></span></div>
- </div>
- <div class="box">
-  <h2>* Step 2: Play</h2>
-  <button class="btn go" id="play" disabled>Start game</button>
-  <button class="btn" id="forget" disabled>Forget files</button>
-  <div class="sub">Your files never leave this device.</div>
- </div>
-</section>
+      <div id="drop-zone" class="drop-zone">
+        <p class="drop-text">Przeciągnij i upuść plik <strong>.zip</strong> lub <strong>data.win</strong></p>
+        <p class="drop-hint">lub</p>
+        <label for="file-input" class="retro-btn">WYBIERZ PLIK</label>
+        <input type="file" id="file-input" accept=".zip,.win,.ogg" multiple hidden />
+        <label for="folder-input" class="retro-btn secondary">WYBIERZ FOLDER</label>
+        <input type="file" id="folder-input" webkitdirectory multiple hidden />
+      </div>
 
-<section id="stage">
- <div id="gamewrap">
-  <canvas id="screen" width="640" height="480" tabindex="0"></canvas>
-  <div id="pad">
-   <div class="dp"><span></span><button data-k="ArrowUp">▲</button><span></span><button data-k="ArrowLeft">◀</button><span></span><button data-k="ArrowRight">▶</button><span></span><button data-k="ArrowDown">▼</button><span></span></div>
-   <div class="ab"><button data-k="c">C</button><button data-k="x">X</button><button data-k="z">Z</button></div>
+      <div id="file-list-container" class="file-list-container hidden">
+        <h3 class="retro-label">WGRANE PLIKI</h3>
+        <ul id="file-list" class="file-list"></ul>
+        <div class="action-row">
+          <button id="start-btn" class="retro-btn">URUCHOM GRĘ</button>
+          <button id="reset-btn" class="retro-btn danger">RESETUJ DANE</button>
+        </div>
+      </div>
+
+      <div id="storage-status" class="storage-status"></div>
+    </section>
+
+    <!-- ==== Ekran gry ==== -->
+    <section id="game-screen" class="screen">
+      <div id="canvas-wrapper" class="canvas-wrapper">
+        <canvas id="game-canvas" width="640" height="480"></canvas>
+      </div>
+
+      <!-- Sterowanie dotykowe -->
+      <div id="touch-controls" class="touch-controls hidden">
+        <div class="dpad">
+          <button class="dpad-btn up"    data-key="ArrowUp">▲</button>
+          <button class="dpad-btn left"  data-key="ArrowLeft">◀</button>
+          <button class="dpad-btn right" data-key="ArrowRight">▶</button>
+          <button class="dpad-btn down"  data-key="ArrowDown">▼</button>
+        </div>
+        <div class="action-buttons">
+          <button class="action-btn" data-key="z">Z</button>
+          <button class="action-btn" data-key="x">X</button>
+          <button class="action-btn" data-key="c">C</button>
+        </div>
+      </div>
+
+      <!-- Diagnostyka -->
+      <div id="log-panel" class="log-panel">
+        <div class="log-header">
+          <span class="retro-label">DIAGNOSTYKA</span>
+          <button id="clear-log" class="log-clear">✕</button>
+        </div>
+        <pre id="log-output" class="log-output"></pre>
+      </div>
+    </section>
   </div>
- </div>
- <div class="bar">
-  <button class="btn" id="fs">Fullscreen</button>
-  <button class="btn" id="quit">Quit</button>
- </div>
- <div id="msg" class="sub"></div>
- <div id="diag"></div>
-</section>
-<footer>Unofficial fan project · you must own Undertale · not affiliated with tobyfox</footer>
-</main>
 
-<script>
-/* ===== IndexedDB — magazyn plików użytkownika ===== */
-const DB=new Promise((ok,no)=>{const r=indexedDB.open("utweb-game",1);r.onupgradeneeded=()=>r.result.createObjectStore("f");r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error)});
-const io=async(m,f)=>{const d=await DB;return new Promise((ok,no)=>{const t=d.transaction("f",m),q=f(t.objectStore("f"));t.oncomplete=()=>ok(q&&q.result);t.onerror=()=>no(t.error)})};
-const $=id=>document.getElementById(id);
-const say=(t,c)=>{const s=$("status");s.textContent=t;s.className=c||""};
-function setProgress(pct){const v=Math.max(0,Math.min(100,Number(pct)||0));const bar=$("progress"),txt=$("progress-text");if(bar)bar.style.setProperty("--prog",v+"%");if(txt)txt.textContent=Math.round(v)+"%";}
-function showProgress(on){const bar=$("progress");if(!bar)return;bar.classList.toggle("on",!!on);if(on)setProgress(0);}
-function showCached(){const c=$("cache");if(!c)return;c.textContent=" ✔ CACHED";c.classList.add("ready");}
-function hideCached(){const c=$("cache");if(!c)return;c.textContent="";c.classList.remove("ready");}
-function showDiag(text){const d=$("diag");if(!d)return;d.innerHTML=text;d.classList.add("on");}
-function logDiag(line){const d=$("diag");if(!d)return;d.classList.add("on");d.textContent+=line+"\n";d.scrollTop=d.scrollHeight;}
-
-async function refresh(){
- try{
-  const w=await io("readonly",o=>o.get("data.win"));
-  const keys=await io("readonly",o=>o.getAllKeys());
-  $("play").disabled=$("forget").disabled=!w;
-  if(w){say(`✔ data.win ready (${(w.byteLength/1048576).toFixed(1)} MB) + ${Math.max(0,keys.length-1)} audio file(s)`,"ok");showCached();}
-  else{say("Nothing loaded yet.");hideCached();}
- }catch(e){$("play").disabled=$("forget").disabled=true;say("Storage error: "+e.message,"err");}
-}
-
-async function ingest(list){
- list=Array.from(list||[]); if(!list.length) return;
- showProgress(true); setProgress(0); say("Reading files…");
- let saved=0;
- const add=async(name,buf)=>{const base=String(name).split("/").pop().toLowerCase();if(base==="data.win"||base.endsWith(".ogg")){await io("readwrite",o=>o.put(buf,base));saved++;}};
- try{
-  const jobs=[]; let total=0;
-  for(const f of list){
-   if(/\.zip$/i.test(f.name)){const z=await JSZip.loadAsync(f);const entries=Object.values(z.files).filter(e=>!e.dir);total+=entries.length;jobs.push({zip:z,entries});}
-   else{total++;jobs.push({file:f});}
-  }
-  if(!total){showProgress(false);say("Nothing to read.","err");return;}
-  let done=0;
-  for(const job of jobs){
-   if(job.zip){for(const e of job.entries){await add(e.name,await e.async("arraybuffer"));done++;setProgress(done/total*100);}}
-   else{await add(job.file.webkitRelativePath||job.file.name,await job.file.arrayBuffer());done++;setProgress(done/total*100);}
-  }
-  setProgress(100);
-  if(saved){say(`✔ ${saved} file(s) cached.`,"ok");showCached();setTimeout(()=>showProgress(false),500);}
-  else{showProgress(false);say("No data.win found.","err");}
- }catch(e){showProgress(false);say("Couldn't read: "+(e&&e.message||e),"err");}
- $("dir").value="";$("zip").value="";
- await refresh();
-}
-
-$("dir").onchange=e=>ingest(e.target.files);
-$("zip").onchange=e=>ingest(e.target.files);
-const dz=$("drop");
-["dragover","dragenter"].forEach(t=>dz.addEventListener(t,e=>{e.preventDefault();dz.classList.add("over")}));
-["dragleave","drop"].forEach(t=>dz.addEventListener(t,e=>{e.preventDefault();dz.classList.remove("over")}));
-dz.addEventListener("drop",e=>ingest(e.dataTransfer.files));
-$("forget").onclick=async()=>{try{await io("readwrite",o=>o.clear());}catch(e){}try{const r=await navigator.storage.getDirectory();for await(const [n,h] of r.entries()){await r.removeEntry(n,{recursive:true});}}catch(e){}$("play").disabled=$("forget").disabled=true;hideCached();showProgress(false);say("Files removed.");refresh();};
-
-/* ===== Touch ===== */
-const isTouch=matchMedia("(pointer:coarse)").matches;
-const kc={ArrowUp:38,ArrowDown:40,ArrowLeft:37,ArrowRight:39,z:90,x:88,c:67};
-const fire=(k,t)=>$("screen").dispatchEvent(new KeyboardEvent(t,{key:k,code:k.length>1?k:"Key"+k.toUpperCase(),keyCode:kc[k],which:kc[k],bubbles:true}));
-document.querySelectorAll("#pad button").forEach(b=>{
- const k=b.dataset.k;
- b.addEventListener("pointerdown",e=>{e.preventDefault();b.classList.add("d");fire(k,"keydown")});
- ["pointerup","pointercancel","pointerleave"].forEach(t=>b.addEventListener(t,e=>{e.preventDefault();if(b.classList.contains("d")){b.classList.remove("d");fire(k,"keyup")}}));
-});
-
-/* ===== OPFS helpers ===== */
-async function opfsWrite(name, buf){
- const root=await navigator.storage.getDirectory();
- const parts=String(name).split("/").filter(Boolean);
- let dir=root;
- for(let i=0;i<parts.length-1;i++) dir=await dir.getDirectoryHandle(parts[i],{create:true});
- const fh=await dir.getFileHandle(parts[parts.length-1],{create:true});
- const w=await fh.createWritable();
- await w.write(new Uint8Array(buf));
- await w.close();
-}
-async function opfsList(){
- const root=await navigator.storage.getDirectory();
- const out=[];
- async function walk(d,prefix){
-  for await(const [n,h] of d.entries()){
-   const p=prefix?prefix+"/"+n:n;
-   if(h.kind==="file"){const f=await h.getFile();out.push(`${p} (${f.size} B)`);}
-   else await walk(h,p);
-  }
- }
- await walk(root,"");
- return out;
-}
-
-/* ===== Launch ===== */
-let M=null;
-
-$("play").onclick=async()=>{
- const w=await io("readonly",o=>o.get("data.win"));
- if(!w) return refresh();
- const ogg={};
- for(const k of await io("readonly",o=>o.getAllKeys())) if(k.endsWith(".ogg")) ogg[k]=await io("readonly",o=>o.get(k));
-
- $("setup").style.display="none";
- $("stage").classList.add("on");
- if(isTouch)$("pad").classList.add("on");
- $("screen").focus();
- const d=$("diag"); d.textContent=""; d.classList.add("on");
-
- logDiag("=== START ===");
- logDiag(`data.win: ${(w.byteLength/1048576).toFixed(2)} MB, ogg: ${Object.keys(ogg).length}`);
-
- /* 1. Wgraj pliki do OPFS */
- try{
-  logDiag("Zapisuję pliki do OPFS...");
-  await opfsWrite("data.win", w);
-  for(const k in ogg) await opfsWrite(k, ogg[k]);
-  const listing=await opfsList();
-  logDiag("OPFS zawiera:\n  "+listing.join("\n  "));
- }catch(e){
-  logDiag("BŁĄD OPFS: "+e.message);
-  $("msg").innerHTML='<span class="err">Nie mogę zapisać do OPFS: '+e.message+'</span>';
-  return;
- }
-
- /* 2. Uruchom silnik */
- $("msg").textContent="Ładuję silnik...";
- logDiag("Ładuję butterscotch.mjs...");
-
- const config={
-  canvas:$("screen"),
-  noInitialRun:true,
-  print:t=>{console.log("[game]",t);logDiag("[game] "+t);},
-  printErr:t=>{console.warn("[game]",t);logDiag("[game-err] "+t);},
-  onRuntimeInitialized:async function(){
-   logDiag("onRuntimeInitialized — silnik gotowy");
-   try{
-    /* Montuj OPFS */
-    if(typeof this._mountOpfs==="function"){
-     logDiag("Wywołuję _mountOpfs()...");
-     const r=this._mountOpfs();
-     logDiag("  _mountOpfs zwróciło: "+r);
-    } else {
-     logDiag("  _mountOpfs NIE ISTNIEJE");
-    }
-
-    await new Promise(r=>setTimeout(r,300));
-
-    /* Start runnera */
-    if(typeof this._startRunner==="function"){
-     logDiag("Wywołuję _startRunner()...");
-     const r=this._startRunner();
-     logDiag("  _startRunner zwróciło: "+r);
-     $("msg").textContent="";
-    } else if(typeof this._main==="function"){
-     logDiag("Wywołuję _main(0,0)...");
-     const r=this._main(0,0);
-     logDiag("  _main zwróciło: "+r);
-    } else {
-     logDiag("BRAK _startRunner i _main!");
-    }
-   }catch(e){
-    logDiag("BŁĄD w onRuntimeInitialized: "+e.message+"\n"+e.stack);
-    console.error(e);
-   }
-  },
-  onAbort:r=>{logDiag("onAbort: "+r);$("msg").innerHTML='<span class="err">Engine stopped: '+r+'</span>';}
- };
- M=config;
- globalThis.Module=config;
-
- try{
-  const mod=await import("./butterscotch.mjs");
-  const factory=(typeof mod==="function")?mod:mod.default;
-  logDiag("Eksport .mjs: "+(typeof factory));
-  const result=await factory(config);
-  if(result&&typeof result==="object")M=result;
-  logDiag("Silnik załadowany.");
- }catch(e){
-  logDiag("BŁĄD ładowania: "+e.message+"\n"+e.stack);
-  console.error(e);
-  $("msg").innerHTML='<span class="err">Błąd: '+e.message+'</span>';
- }
-};
-
-$("quit").onclick=()=>location.reload();
-$("fs").onclick=()=>{const el=$("gamewrap");const fn=el.requestFullscreen||el.webkitRequestFullscreen;if(fn)fn.call(el);};
-document.addEventListener("fullscreenchange",()=>{if(document.fullscreenElement)$("screen").focus();});
-
-refresh();
-</script></body></html>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

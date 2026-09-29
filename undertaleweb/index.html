@@ -37,10 +37,10 @@ input[type=file]{display:none}
 #stage.on{display:block}
 #screen{width:100%;aspect-ratio:4/3;background:#000;border:4px solid var(--fg);box-shadow:0 0 40px #4a4aff33;display:block;image-rendering:pixelated;outline:none}
 .bar{margin-top:8px}
-#progress{display:none;width:100%;height:20px;background:#000;border:2px solid var(--fg);margin:10px 0;position:relative;overflow:hidden}
+#progress{display:none;width:100%;height:20px;background:#000;border:2px solid var(--fg);margin:10px 0;position:relative;overflow:hidden;--prog:0%}
 #progress.on{display:block}
-#progress::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,var(--acc),#ff0,var(--acc));animation:pulse .8s infinite;width:0%;height:100%}
-#progress-text{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font:10px var(--px);z-index:1;color:#000;text-shadow:1px 1px #fff}
+#progress::after{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--prog,0%);background:linear-gradient(90deg,var(--acc),#ff0,var(--acc));transition:width .15s linear;animation:pulse .8s infinite}
+#progress-text{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font:10px var(--px);z-index:1;color:#fff;text-shadow:1px 1px 0 #000,-1px -1px 0 #000}
 .cache-status{display:inline-block;padding:2px 6px;border:1px solid var(--dim);font-size:11px;color:var(--dim);margin-left:8px}
 .cache-status.ready{border-color:var(--acc);color:var(--acc)}
 #pad{display:none;position:fixed;left:0;right:0;bottom:0;padding:10px 14px calc(10px + env(safe-area-inset-bottom,0px));justify-content:space-between;align-items:flex-end;pointer-events:none;user-select:none;-webkit-user-select:none;touch-action:none;z-index:9}
@@ -66,8 +66,7 @@ footer{text-align:center;color:var(--dim);font-size:18px;margin-top:28px}
   Drop your Steam Undertale folder or a zip here,<br>or choose below. Only <b>data.win</b> and the <b>.ogg</b> files are used.<br>
   <label class="btn">Folder<input id="dir" type="file" webkitdirectory multiple></label>
   <label class="btn">Zip / files<input id="zip" type="file" multiple accept=".zip,.win,.ogg"></label>
-  <div id="progress" class="on">
-   <div id="progress::after"></div>
+  <div id="progress">
    <div id="progress-text">0%</div>
   </div>
   <div id="status">Nothing loaded yet.<span id="cache" class="cache-status"></span></div>
@@ -112,82 +111,151 @@ const DB=new Promise((ok,no)=>{const r=indexedDB.open("utweb-game",1);r.onupgrad
 const io=async(m,f)=>{const d=await DB;return new Promise((ok,no)=>{const t=d.transaction("f",m),q=f(t.objectStore("f"));t.oncomplete=()=>ok(q&&q.result);t.onerror=()=>no(t.error)})};
 const $=id=>document.getElementById(id);
 const say=(t,c)=>{const s=$("status");s.textContent=t;s.className=c||""};
+
+/* --- progress bar: drive a CSS variable, never query the pseudo-element --- */
 function setProgress(pct){
- const t=$("progress-text"),p=$("progress");
- if(t)t.textContent=Math.round(pct)+"%";
- p.style.setProperty("--prog",pct+"%");
+ const v=Math.max(0,Math.min(100,Number(pct)||0));
+ const bar=$("progress"), txt=$("progress-text");
+ if(bar) bar.style.setProperty("--prog",v+"%");
+ if(txt) txt.textContent=Math.round(v)+"%";
+}
+function showProgress(on){
+ const bar=$("progress");
+ if(!bar) return;
+ bar.classList.toggle("on",!!on);
+ if(on) setProgress(0);
 }
 function showCached(){
  const c=$("cache");
+ if(!c) return;
  c.textContent=" ✔ CACHED";
  c.classList.add("ready");
 }
+function hideCached(){
+ const c=$("cache");
+ if(!c) return;
+ c.textContent="";
+ c.classList.remove("ready");
+}
 
 async function refresh(){
- const w=await io("readonly",o=>o.get("data.win")), n=(await io("readonly",o=>o.getAllKeys())).length;
- $("play").disabled=$("forget").disabled=!w;
- if(w){
-  say(`✔ data.win ready (${(w.byteLength/1048576).toFixed(1)} MB) + ${n-1} audio file(s)`,"ok");
-  showCached();
- } else {
-  $("cache").textContent="";
-  $("cache").classList.remove("ready");
+ let w=null;
+ try{
+  w=await io("readonly",o=>o.get("data.win"));
+  const keys=await io("readonly",o=>o.getAllKeys());
+  $("play").disabled=$("forget").disabled=!w;
+  if(w){
+   say(`✔ data.win ready (${(w.byteLength/1048576).toFixed(1)} MB) + ${Math.max(0,keys.length-1)} audio file(s)`,"ok");
+   showCached();
+  } else {
+   say("Nothing loaded yet.");
+   hideCached();
+  }
+ }catch(e){
+  $("play").disabled=$("forget").disabled=true;
+  say("Storage error: "+e.message,"err");
  }
 }
-function setProgress(pct){
- const t=$("progress-text");
- const p=$("progress").querySelector("#progress::after");
- if(p)p.style.width=pct+"%";
- if(t)t.textContent=Math.round(pct)+"%";
-}
-function updateCache(){
- const c=$("cache");
- c.textContent="✔ CACHED";
- c.classList.add("ready");
-}
+
 async function ingest(list){
- let n=0;
- $("progress").classList.add("on");
+ list=Array.from(list||[]);
+ if(!list.length) return;
+ showProgress(true);
  setProgress(0);
  say("Reading files…");
+
+ let saved=0;
  const add=async(name,buf)=>{
-  const b=name.split("/").pop().toLowerCase();
-  if(b==="data.win"||b.endsWith(".ogg")){await io("readwrite",o=>o.put(buf,b));n++}
+  const base=String(name).split("/").pop().toLowerCase();
+  if(base==="data.win"||base.endsWith(".ogg")){
+   await io("readwrite",o=>o.put(buf,base));
+   saved++;
+  }
  };
+
  try{
-  let done=0,total=0;
+  /* Pass 1: expand archives and count every entry we will touch */
+  const jobs=[];
+  let total=0;
   for(const f of list){
-   if(f.name.toLowerCase().endsWith(".zip")){
+   if(/\.zip$/i.test(f.name)){
     const z=await JSZip.loadAsync(f);
-    for(const e of Object.values(z.files)){if(!e.dir){total++}}
-   } else total++;
+    const entries=Object.values(z.files).filter(e=>!e.dir);
+    total+=entries.length;
+    jobs.push({zip:z,entries});
+   } else {
+    total++;
+    jobs.push({file:f});
+   }
   }
-  for(const f of list){
-   if(f.name.toLowerCase().endsWith(".zip")){
-    const z=await JSZip.loadAsync(f);
-    for(const e of Object.values(z.files))if(!e.dir){await add(e.name,await e.async("arraybuffer"));done++;setProgress((done/total)*100)}
-   } else {await add(f.webkitRelativePath||f.name,await f.arrayBuffer());done++;setProgress((done/total)*100)}
+
+  if(!total){
+   showProgress(false);
+   say("Nothing to read in that selection.","err");
+   return;
   }
- }catch(e){$("progress").classList.remove("on");return say("Couldn't read that: "+e.message,"err")}
- setProgress(100);
- if(n){say("✔ Files cached to browser");showCached();setTimeout(()=>$("progress").classList.remove("on"),400)}
- else {$("progress").classList.remove("on");say("No data.win found in that selection.","err")}
- refresh();
+
+  /* Pass 2: read everything, updating the bar */
+  let done=0;
+  for(const job of jobs){
+   if(job.zip){
+    for(const e of job.entries){
+     await add(e.name,await e.async("arraybuffer"));
+     done++; setProgress(done/total*100);
+    }
+   } else {
+    await add(job.file.webkitRelativePath||job.file.name,await job.file.arrayBuffer());
+    done++; setProgress(done/total*100);
+   }
+  }
+
+  setProgress(100);
+
+  if(saved){
+   say(`✔ ${saved} file(s) cached in your browser.`,"ok");
+   showCached();
+   setTimeout(()=>showProgress(false),500);
+  } else {
+   showProgress(false);
+   say("No data.win found in that selection.","err");
+  }
+ }catch(e){
+  showProgress(false);
+  say("Couldn't read that: "+(e&&e.message||e),"err");
+  console.error(e);
+ }
+
+ /* allow re-picking the same files/folder */
+ $("dir").value="";
+ $("zip").value="";
+ await refresh();
 }
+
 $("dir").onchange=e=>ingest(e.target.files);
 $("zip").onchange=e=>ingest(e.target.files);
 const dz=$("drop");
 ["dragover","dragenter"].forEach(t=>dz.addEventListener(t,e=>{e.preventDefault();dz.classList.add("over")}));
 ["dragleave","drop"].forEach(t=>dz.addEventListener(t,e=>{e.preventDefault();dz.classList.remove("over")}));
 dz.addEventListener("drop",e=>ingest(e.dataTransfer.files));
-$("forget").onclick=async()=>{await io("readwrite",o=>o.clear());$("play").disabled=$("forget").disabled=true;say("Files removed.");$("cache").textContent="";$("cache").classList.remove("ready");refresh()};
+$("forget").onclick=async()=>{
+ try{ await io("readwrite",o=>o.clear()); }catch(e){}
+ $("play").disabled=$("forget").disabled=true;
+ hideCached();
+ showProgress(false);
+ say("Files removed.");
+ refresh();
+};
 
 /* ===== Launch the engine ===== */
 let M=null,syncTimer=null;
 function syncOut(){if(M&&M.FS)M.FS.syncfs(false,()=>{})}
 $("play").onclick=async()=>{
  const w=await io("readonly",o=>o.get("data.win"));
- const ogg={};for(const k of await io("readonly",o=>o.getAllKeys()))if(k.endsWith(".ogg"))ogg[k]=await io("readonly",o=>o.get(k));
+ if(!w) return refresh();
+ const ogg={};
+ for(const k of await io("readonly",o=>o.getAllKeys())){
+  if(k.endsWith(".ogg"))ogg[k]=await io("readonly",o=>o.get(k));
+ }
  $("setup").style.display="none";$("stage").classList.add("on");$("screen").focus();
  $("msg").textContent="Loading engine…";
  try{
@@ -243,4 +311,7 @@ document.querySelectorAll("#pad button").forEach(b=>{
  b.addEventListener("pointerdown",e=>{e.preventDefault();b.classList.add("d");fire(k,"keydown")});
  ["pointerup","pointercancel","pointerleave"].forEach(t=>b.addEventListener(t,e=>{e.preventDefault();if(b.classList.contains("d")){b.classList.remove("d");fire(k,"keyup")}}));
 });
+
+/* ===== Restore cached files on page load ===== */
+refresh();
 </script></body></html>

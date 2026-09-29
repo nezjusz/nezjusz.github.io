@@ -53,7 +53,7 @@ input[type=file]{display:none}
 .ab{display:flex;gap:8px;align-items:flex-end}
 .ab button:nth-child(2){margin-bottom:24px}
 footer{text-align:center;color:var(--dim);font-size:18px;margin-top:28px}
-#diag{white-space:pre-wrap;font:14px/1.35 "Courier New",monospace;background:#0a0a0a;border:2px solid #333;padding:10px;margin-top:10px;display:none;color:#ccc}
+#diag{white-space:pre-wrap;font:13px/1.35 "Courier New",monospace;background:#0a0a0a;border:2px solid #333;padding:10px;margin-top:10px;display:none;color:#ccc;max-height:400px;overflow:auto}
 #diag.on{display:block}
 #diag b{color:var(--acc)}
 @media(prefers-reduced-motion:reduce){*{animation:none!important}}
@@ -78,7 +78,7 @@ footer{text-align:center;color:var(--dim);font-size:18px;margin-top:28px}
   <h2>* Step 2: Play</h2>
   <button class="btn go" id="play" disabled>Start game</button>
   <button class="btn" id="forget" disabled>Forget files</button>
-  <div class="sub">Your files never leave this device. They're kept in your browser so you only load them once.</div>
+  <div class="sub">Your files never leave this device.</div>
  </div>
 </section>
 
@@ -92,8 +92,6 @@ footer{text-align:center;color:var(--dim);font-size:18px;margin-top:28px}
  </div>
  <div class="bar">
   <button class="btn" id="fs">Fullscreen</button>
-  <button class="btn" id="exp">Download saves</button>
-  <label class="btn">Import saves<input id="imp" type="file" multiple accept=".zip,*"></label>
   <button class="btn" id="quit">Quit</button>
  </div>
  <div id="msg" class="sub"></div>
@@ -103,79 +101,50 @@ footer{text-align:center;color:var(--dim);font-size:18px;margin-top:28px}
 </main>
 
 <script>
-/* ===== CONFIG ===== */
-const CFG={
- engine:"./butterscotch.mjs",
- wasm:"./butterscotch.wasm",
- dataPath:"/data.win",
- savePath:"/saves",
- args:["/data.win"]
-};
-
-/* ===== IndexedDB ===== */
+/* ===== IndexedDB — magazyn plików użytkownika ===== */
 const DB=new Promise((ok,no)=>{const r=indexedDB.open("utweb-game",1);r.onupgradeneeded=()=>r.result.createObjectStore("f");r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error)});
 const io=async(m,f)=>{const d=await DB;return new Promise((ok,no)=>{const t=d.transaction("f",m),q=f(t.objectStore("f"));t.oncomplete=()=>ok(q&&q.result);t.onerror=()=>no(t.error)})};
 const $=id=>document.getElementById(id);
 const say=(t,c)=>{const s=$("status");s.textContent=t;s.className=c||""};
-
-function setProgress(pct){
- const v=Math.max(0,Math.min(100,Number(pct)||0));
- const bar=$("progress"), txt=$("progress-text");
- if(bar) bar.style.setProperty("--prog",v+"%");
- if(txt) txt.textContent=Math.round(v)+"%";
-}
+function setProgress(pct){const v=Math.max(0,Math.min(100,Number(pct)||0));const bar=$("progress"),txt=$("progress-text");if(bar)bar.style.setProperty("--prog",v+"%");if(txt)txt.textContent=Math.round(v)+"%";}
 function showProgress(on){const bar=$("progress");if(!bar)return;bar.classList.toggle("on",!!on);if(on)setProgress(0);}
 function showCached(){const c=$("cache");if(!c)return;c.textContent=" ✔ CACHED";c.classList.add("ready");}
 function hideCached(){const c=$("cache");if(!c)return;c.textContent="";c.classList.remove("ready");}
-
 function showDiag(text){const d=$("diag");if(!d)return;d.innerHTML=text;d.classList.add("on");}
-function hideDiag(){const d=$("diag");if(d)d.classList.remove("on");}
+function logDiag(line){const d=$("diag");if(!d)return;d.classList.add("on");d.textContent+=line+"\n";d.scrollTop=d.scrollHeight;}
 
 async function refresh(){
- let w=null;
  try{
-  w=await io("readonly",o=>o.get("data.win"));
+  const w=await io("readonly",o=>o.get("data.win"));
   const keys=await io("readonly",o=>o.getAllKeys());
   $("play").disabled=$("forget").disabled=!w;
-  if(w){
-   say(`✔ data.win ready (${(w.byteLength/1048576).toFixed(1)} MB) + ${Math.max(0,keys.length-1)} audio file(s)`,"ok");
-   showCached();
-  } else { say("Nothing loaded yet."); hideCached(); }
- }catch(e){
-  $("play").disabled=$("forget").disabled=true;
-  say("Storage error: "+e.message,"err");
- }
+  if(w){say(`✔ data.win ready (${(w.byteLength/1048576).toFixed(1)} MB) + ${Math.max(0,keys.length-1)} audio file(s)`,"ok");showCached();}
+  else{say("Nothing loaded yet.");hideCached();}
+ }catch(e){$("play").disabled=$("forget").disabled=true;say("Storage error: "+e.message,"err");}
 }
 
 async function ingest(list){
- list=Array.from(list||[]);
- if(!list.length) return;
+ list=Array.from(list||[]); if(!list.length) return;
  showProgress(true); setProgress(0); say("Reading files…");
  let saved=0;
- const add=async(name,buf)=>{
-  const base=String(name).split("/").pop().toLowerCase();
-  if(base==="data.win"||base.endsWith(".ogg")){await io("readwrite",o=>o.put(buf,base));saved++;}
- };
+ const add=async(name,buf)=>{const base=String(name).split("/").pop().toLowerCase();if(base==="data.win"||base.endsWith(".ogg")){await io("readwrite",o=>o.put(buf,base));saved++;}};
  try{
   const jobs=[]; let total=0;
   for(const f of list){
-   if(/\.zip$/i.test(f.name)){
-    const z=await JSZip.loadAsync(f);
-    const entries=Object.values(z.files).filter(e=>!e.dir);
-    total+=entries.length; jobs.push({zip:z,entries});
-   } else { total++; jobs.push({file:f}); }
+   if(/\.zip$/i.test(f.name)){const z=await JSZip.loadAsync(f);const entries=Object.values(z.files).filter(e=>!e.dir);total+=entries.length;jobs.push({zip:z,entries});}
+   else{total++;jobs.push({file:f});}
   }
-  if(!total){ showProgress(false); say("Nothing to read in that selection.","err"); return; }
+  if(!total){showProgress(false);say("Nothing to read.","err");return;}
   let done=0;
   for(const job of jobs){
-   if(job.zip){ for(const e of job.entries){ await add(e.name,await e.async("arraybuffer")); done++; setProgress(done/total*100); } }
-   else { await add(job.file.webkitRelativePath||job.file.name,await job.file.arrayBuffer()); done++; setProgress(done/total*100); }
+   if(job.zip){for(const e of job.entries){await add(e.name,await e.async("arraybuffer"));done++;setProgress(done/total*100);}}
+   else{await add(job.file.webkitRelativePath||job.file.name,await job.file.arrayBuffer());done++;setProgress(done/total*100);}
   }
   setProgress(100);
-  if(saved){ say(`✔ ${saved} file(s) cached in your browser.`,"ok"); showCached(); setTimeout(()=>showProgress(false),500); }
-  else { showProgress(false); say("No data.win found in that selection.","err"); }
- }catch(e){ showProgress(false); say("Couldn't read that: "+(e&&e.message||e),"err"); console.error(e); }
- $("dir").value=""; $("zip").value="";
+  if(saved){say(`✔ ${saved} file(s) cached.`,"ok");showCached();setTimeout(()=>showProgress(false),500);}
+  else{showProgress(false);say("No data.win found.","err");}
+ }catch(e){showProgress(false);say("Couldn't read: "+(e&&e.message||e),"err");}
+ $("dir").value="";$("zip").value="";
  await refresh();
 }
 
@@ -185,12 +154,7 @@ const dz=$("drop");
 ["dragover","dragenter"].forEach(t=>dz.addEventListener(t,e=>{e.preventDefault();dz.classList.add("over")}));
 ["dragleave","drop"].forEach(t=>dz.addEventListener(t,e=>{e.preventDefault();dz.classList.remove("over")}));
 dz.addEventListener("drop",e=>ingest(e.dataTransfer.files));
-$("forget").onclick=async()=>{
- try{ await io("readwrite",o=>o.clear()); }catch(e){}
- $("play").disabled=$("forget").disabled=true;
- hideCached(); showProgress(false); say("Files removed.");
- refresh();
-};
+$("forget").onclick=async()=>{try{await io("readwrite",o=>o.clear());}catch(e){}try{const r=await navigator.storage.getDirectory();for await(const [n,h] of r.entries()){await r.removeEntry(n,{recursive:true});}}catch(e){}$("play").disabled=$("forget").disabled=true;hideCached();showProgress(false);say("Files removed.");refresh();};
 
 /* ===== Touch ===== */
 const isTouch=matchMedia("(pointer:coarse)").matches;
@@ -202,198 +166,125 @@ document.querySelectorAll("#pad button").forEach(b=>{
  ["pointerup","pointercancel","pointerleave"].forEach(t=>b.addEventListener(t,e=>{e.preventDefault();if(b.classList.contains("d")){b.classList.remove("d");fire(k,"keyup")}}));
 });
 
-/* ===== Preflight ===== */
-async function diagnoseEngine(){
- const out={mjs:null,wasm:null,ok:false,isolated:self.crossOriginIsolated===true};
- try{
-  const r=await fetch(CFG.engine,{cache:"no-store"});
-  const t=await r.text();
-  out.mjs={status:r.status,size:t.length,hasExportDefault:/export\s+default|Module\s*=/.test(t),preview:t.slice(0,60).replace(/\s+/g," ")};
- }catch(e){ out.mjs={error:e.message}; }
- try{
-  const r=await fetch(CFG.wasm,{cache:"no-store"});
-  const buf=new Uint8Array(await r.arrayBuffer());
-  const magic=Array.from(buf.slice(0,4)).map(b=>b.toString(16).padStart(2,"0")).join(" ");
-  const isWasm = buf[0]===0x00 && buf[1]===0x61 && buf[2]===0x73 && buf[3]===0x6d;
-  out.wasm={status:r.status,size:buf.length,magic,isWasm,preview: isWasm ? "(binary — OK)" : new TextDecoder().decode(buf.slice(0,80)).replace(/\s+/g," ")};
- }catch(e){ out.wasm={error:e.message}; }
- out.ok = !!(out.mjs && !out.mjs.error && out.mjs.hasExportDefault && out.wasm && !out.wasm.error && out.wasm.isWasm);
+/* ===== OPFS helpers ===== */
+async function opfsWrite(name, buf){
+ const root=await navigator.storage.getDirectory();
+ const parts=String(name).split("/").filter(Boolean);
+ let dir=root;
+ for(let i=0;i<parts.length-1;i++) dir=await dir.getDirectoryHandle(parts[i],{create:true});
+ const fh=await dir.getFileHandle(parts[parts.length-1],{create:true});
+ const w=await fh.createWritable();
+ await w.write(new Uint8Array(buf));
+ await w.close();
+}
+async function opfsList(){
+ const root=await navigator.storage.getDirectory();
+ const out=[];
+ async function walk(d,prefix){
+  for await(const [n,h] of d.entries()){
+   const p=prefix?prefix+"/"+n:n;
+   if(h.kind==="file"){const f=await h.getFile();out.push(`${p} (${f.size} B)`);}
+   else await walk(h,p);
+  }
+ }
+ await walk(root,"");
  return out;
 }
 
-function renderDiag(d){
- let html="<b>DIAGNOSTYKA SILNIKA</b>\n\n";
- html+=`crossOriginIsolated: ${d.isolated?"✔ TAK":"✗ NIE — to blokuje SharedArrayBuffer i wątki"}\n`;
- if(!d.isolated) html+=`  → coi-serviceworker.js musi być załadowany w <head> i musi przeładować stronę raz.\n`;
- html+="\nbutterscotch.mjs\n";
- if(d.mjs.error) html+=`  ✗ błąd pobierania: ${d.mjs.error}\n`;
- else {
-  html+=`  status HTTP:    ${d.mjs.status}\n`;
-  html+=`  rozmiar:        ${d.mjs.size} B\n`;
-  html+=`  eksport modułu: ${d.mjs.hasExportDefault?"✔ tak":"✗ NIE"}\n`;
-  html+=`  początek:       ${d.mjs.preview}…\n`;
- }
- html+="\nbutterscotch.wasm\n";
- if(d.wasm.error) html+=`  ✗ błąd pobierania: ${d.wasm.error}\n`;
- else {
-  html+=`  status HTTP:     ${d.wasm.status}\n`;
-  html+=`  rozmiar:         ${d.wasm.size} B\n`;
-  html+=`  pierwsze 4 bajty: ${d.wasm.magic}\n`;
-  if(d.wasm.isWasm) html+=`  ✔ to jest prawidłowy plik WebAssembly (00 61 73 6d)\n`;
-  else html+=`  ✗ TO NIE JEST PLIK WASM. Powinno być: 00 61 73 6d\n  zamiast tego: ${d.wasm.preview}…\n`;
- }
- html+="\n";
- if(d.ok && d.isolated) html+="<b>✔ Wszystko OK — silnik powinien się załadować.</b>";
- else if(!d.isolated) html+="<b>✗ Brak izolacji cross-origin. Dodaj coi-serviceworker.js i przeładuj stronę.</b>";
- else html+="<b>✗ Silnik nie może się załadować — patrz wyżej.</b>";
- return html;
-}
-
 /* ===== Launch ===== */
-let M=null,syncTimer=null;
-function syncOut(){if(M&&M.FS)M.FS.syncfs(false,()=>{})}
+let M=null;
 
 $("play").onclick=async()=>{
  const w=await io("readonly",o=>o.get("data.win"));
  if(!w) return refresh();
  const ogg={};
- for(const k of await io("readonly",o=>o.getAllKeys())){
-  if(k.endsWith(".ogg"))ogg[k]=await io("readonly",o=>o.get(k));
- }
+ for(const k of await io("readonly",o=>o.getAllKeys())) if(k.endsWith(".ogg")) ogg[k]=await io("readonly",o=>o.get(k));
 
  $("setup").style.display="none";
  $("stage").classList.add("on");
  if(isTouch)$("pad").classList.add("on");
  $("screen").focus();
- hideDiag();
- $("msg").textContent="Sprawdzam pliki silnika…";
+ const d=$("diag"); d.textContent=""; d.classList.add("on");
 
- const d=await diagnoseEngine();
- if(!d.ok || !d.isolated){
-  $("msg").innerHTML='<span class="err">Silnik nie może się załadować.</span>';
-  showDiag(renderDiag(d));
+ logDiag("=== START ===");
+ logDiag(`data.win: ${(w.byteLength/1048576).toFixed(2)} MB, ogg: ${Object.keys(ogg).length}`);
+
+ /* 1. Wgraj pliki do OPFS */
+ try{
+  logDiag("Zapisuję pliki do OPFS...");
+  await opfsWrite("data.win", w);
+  for(const k in ogg) await opfsWrite(k, ogg[k]);
+  const listing=await opfsList();
+  logDiag("OPFS zawiera:\n  "+listing.join("\n  "));
+ }catch(e){
+  logDiag("BŁĄD OPFS: "+e.message);
+  $("msg").innerHTML='<span class="err">Nie mogę zapisać do OPFS: '+e.message+'</span>';
   return;
  }
- hideDiag();
- $("msg").textContent="Loading engine…";
 
- let Mod=null;
+ /* 2. Uruchom silnik */
+ $("msg").textContent="Ładuję silnik...";
+ logDiag("Ładuję butterscotch.mjs...");
+
  const config={
   canvas:$("screen"),
-  arguments:CFG.args,
-  noInitialRun:true, /* KLUCZOWA ZMIANA: nie uruchamiaj main() automatycznie */
-  print:t=>console.log("[game]",t),
-  printErr:t=>console.warn("[game]",t),
-
-  /* FS jest gotowy dopiero tutaj — to jest właściwe miejsce na zapis plików */
-  onRuntimeInitialized:function(){
-   clearTimeout(window.__engineTimeout);
-   $("msg").textContent="Inicjalizacja systemu plików...";
+  noInitialRun:true,
+  print:t=>{console.log("[game]",t);logDiag("[game] "+t);},
+  printErr:t=>{console.warn("[game]",t);logDiag("[game-err] "+t);},
+  onRuntimeInitialized:async function(){
+   logDiag("onRuntimeInitialized — silnik gotowy");
    try{
-    const FS=this.FS;
-    if(!FS) throw new Error("FS niedostępny w onRuntimeInitialized");
-    Mod.FS=FS;
-
-    /* data.win */
-    FS.writeFile(CFG.dataPath,new Uint8Array(w));
-
-    /* pliki .ogg */
-    let oggN=0;
-    for(const k in ogg){
-     const path="/"+k;
-     const dir=path.substring(0,path.lastIndexOf("/"))||"/";
-     if(dir!=="/"){ try{ FS.mkdirTree(dir); }catch(e){} }
-     FS.writeFile(path,new Uint8Array(ogg[k]));
-     oggN++;
-    }
-    console.log("[FS] OK: data.win =",w.byteLength,"bytes,",oggN,"ogg file(s)");
-
-    /* IDBFS dla zapisów */
-    try{ FS.mkdir(CFG.savePath); }catch(e){}
-    const IDBFS=this.IDBFS;
-    if(IDBFS){
-     FS.mount(IDBFS,{},CFG.savePath);
-     try{ FS.syncfs(true,err=>{ if(err) console.warn("[syncfs]",err); }); }catch(e){}
-    }
-
-    /* Ręcznie uruchamiamy grę */
-    $("msg").textContent="Uruchamianie gry...";
-    if(typeof this.callMain==="function"){
-     this.callMain(CFG.args);
+    /* Montuj OPFS */
+    if(typeof this._mountOpfs==="function"){
+     logDiag("Wywołuję _mountOpfs()...");
+     const r=this._mountOpfs();
+     logDiag("  _mountOpfs zwróciło: "+r);
     } else {
-     console.warn("[onRuntimeInitialized] callMain niedostępny");
+     logDiag("  _mountOpfs NIE ISTNIEJE");
     }
-    $("msg").textContent="";
+
+    await new Promise(r=>setTimeout(r,300));
+
+    /* Start runnera */
+    if(typeof this._startRunner==="function"){
+     logDiag("Wywołuję _startRunner()...");
+     const r=this._startRunner();
+     logDiag("  _startRunner zwróciło: "+r);
+     $("msg").textContent="";
+    } else if(typeof this._main==="function"){
+     logDiag("Wywołuję _main(0,0)...");
+     const r=this._main(0,0);
+     logDiag("  _main zwróciło: "+r);
+    } else {
+     logDiag("BRAK _startRunner i _main!");
+    }
    }catch(e){
-    console.error("[onRuntimeInitialized] failed:",e);
-    $("msg").innerHTML='<span class="err">Błąd inicjalizacji FS: '+e.message+'</span>';
+    logDiag("BŁĄD w onRuntimeInitialized: "+e.message+"\n"+e.stack);
+    console.error(e);
    }
   },
-
-  postRun:[()=>{
-   clearTimeout(window.__engineTimeout);
-   if(syncTimer)clearInterval(syncTimer);
-   syncTimer=setInterval(syncOut,5000);
-   console.log("[postRun] engine main() returned");
-  }],
-
-  onAbort:r=>{
-   clearTimeout(window.__engineTimeout);
-   $("msg").innerHTML='<span class="err">Engine stopped: '+r+'</span>';
-   console.error("[abort]",r);
-  }
+  onAbort:r=>{logDiag("onAbort: "+r);$("msg").innerHTML='<span class="err">Engine stopped: '+r+'</span>';}
  };
- Mod=config;
+ M=config;
  globalThis.Module=config;
 
- window.__engineTimeout=setTimeout(async()=>{
-  const d2=await diagnoseEngine();
-  $("msg").innerHTML='<span class="err">Silnik zawiesił się w trakcie ładowania.</span>';
-  showDiag(renderDiag(d2)+"\n\n<b>Wskazówka:</b> sprawdź w DevTools → Network, czy wasm ma Content-Type: application/wasm, oraz czy strona ma nagłówki COOP/COEP (Application → Frames → Headers).");
- },25000);
-
  try{
-  const mod=await import(CFG.engine);
+  const mod=await import("./butterscotch.mjs");
   const factory=(typeof mod==="function")?mod:mod.default;
-  if(typeof factory!=="function"){
-   clearTimeout(window.__engineTimeout);
-   throw new Error("Engine module has no default export.");
-  }
+  logDiag("Eksport .mjs: "+(typeof factory));
   const result=await factory(config);
-  if(result&&typeof result==="object")Mod=result;
+  if(result&&typeof result==="object")M=result;
+  logDiag("Silnik załadowany.");
  }catch(e){
-  clearTimeout(window.__engineTimeout);
+  logDiag("BŁĄD ładowania: "+e.message+"\n"+e.stack);
   console.error(e);
-  $("msg").innerHTML='<span class="err">Engine error: '+e.message+'</span>';
-  const d3=await diagnoseEngine();
-  showDiag(renderDiag(d3));
+  $("msg").innerHTML='<span class="err">Błąd: '+e.message+'</span>';
  }
 };
 
-document.addEventListener("visibilitychange",()=>{if(document.hidden)syncOut()});
-addEventListener("pagehide",syncOut);
-$("quit").onclick=()=>{syncOut();setTimeout(()=>location.reload(),300)};
-
-$("fs").onclick=()=>{
- const el=$("gamewrap");
- const fn=el.requestFullscreen||el.webkitRequestFullscreen;
- if(fn) fn.call(el);
-};
-document.addEventListener("fullscreenchange",()=>{ if(document.fullscreenElement)$("screen").focus(); });
-
-$("exp").onclick=async()=>{
- if(!M||!M.FS)return;const FS=M.FS,z=new JSZip();
- for(const f of FS.readdir(CFG.savePath))if(f!=="."&&f!=="..")z.file(f,FS.readFile(CFG.savePath+"/"+f));
- const a=document.createElement("a");a.href=URL.createObjectURL(await z.generateAsync({type:"blob"}));a.download="undertale-saves.zip";a.click();
-};
-$("imp").onchange=async e=>{
- if(!M||!M.FS)return;const FS=M.FS,put=(n,b)=>FS.writeFile(CFG.savePath+"/"+n.split("/").pop(),new Uint8Array(b));
- for(const f of e.target.files){
-  if(f.name.endsWith(".zip")){const z=await JSZip.loadAsync(f);for(const x of Object.values(z.files))if(!x.dir)put(x.name,await x.async("arraybuffer"))}
-  else put(f.name,await f.arrayBuffer());
- }
- syncOut();$("msg").textContent="Saves imported. Restart the game to load them.";
-};
+$("quit").onclick=()=>location.reload();
+$("fs").onclick=()=>{const el=$("gamewrap");const fn=el.requestFullscreen||el.webkitRequestFullscreen;if(fn)fn.call(el);};
+document.addEventListener("fullscreenchange",()=>{if(document.fullscreenElement)$("screen").focus();});
 
 refresh();
 </script></body></html>

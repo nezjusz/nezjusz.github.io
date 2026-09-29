@@ -35,7 +35,11 @@ input[type=file]{display:none}
 .ok{color:#5f5}.err{color:var(--red)}.cached{color:var(--acc)}
 #stage{display:none}
 #stage.on{display:block}
+#gamewrap{position:relative;width:100%;background:#000}
 #screen{width:100%;aspect-ratio:4/3;background:#000;border:4px solid var(--fg);box-shadow:0 0 40px #4a4aff33;display:block;image-rendering:pixelated;outline:none}
+/* Fullscreen: pad lives inside #gamewrap so it stays on screen */
+#gamewrap:fullscreen{width:100vw;height:100vh;display:flex;align-items:center;justify-content:center;background:#000}
+#gamewrap:fullscreen #screen{width:min(100vw,calc(100vh * 4 / 3));height:auto;aspect-ratio:4/3;border:none;box-shadow:none}
 .bar{margin-top:8px}
 #progress{display:none;width:100%;height:20px;background:#000;border:2px solid var(--fg);margin:10px 0;position:relative;overflow:hidden;--prog:0%}
 #progress.on{display:block}
@@ -66,9 +70,7 @@ footer{text-align:center;color:var(--dim);font-size:18px;margin-top:28px}
   Drop your Steam Undertale folder or a zip here,<br>or choose below. Only <b>data.win</b> and the <b>.ogg</b> files are used.<br>
   <label class="btn">Folder<input id="dir" type="file" webkitdirectory multiple></label>
   <label class="btn">Zip / files<input id="zip" type="file" multiple accept=".zip,.win,.ogg"></label>
-  <div id="progress">
-   <div id="progress-text">0%</div>
-  </div>
+  <div id="progress"><div id="progress-text">0%</div></div>
   <div id="status">Nothing loaded yet.<span id="cache" class="cache-status"></span></div>
  </div>
  <div class="box">
@@ -80,7 +82,13 @@ footer{text-align:center;color:var(--dim);font-size:18px;margin-top:28px}
 </section>
 
 <section id="stage">
- <canvas id="screen" width="640" height="480" tabindex="0"></canvas>
+ <div id="gamewrap">
+  <canvas id="screen" width="640" height="480" tabindex="0"></canvas>
+  <div id="pad">
+   <div class="dp"><span></span><button data-k="ArrowUp">▲</button><span></span><button data-k="ArrowLeft">◀</button><span></span><button data-k="ArrowRight">▶</button><span></span><button data-k="ArrowDown">▼</button><span></span></div>
+   <div class="ab"><button data-k="c">C</button><button data-k="x">X</button><button data-k="z">Z</button></div>
+  </div>
+ </div>
  <div class="bar">
   <button class="btn" id="fs">Fullscreen</button>
   <button class="btn" id="exp">Download saves</button>
@@ -92,27 +100,22 @@ footer{text-align:center;color:var(--dim);font-size:18px;margin-top:28px}
 <footer>Unofficial fan project · you must own Undertale · not affiliated with tobyfox</footer>
 </main>
 
-<div id="pad">
- <div class="dp"><span></span><button data-k="ArrowUp">▲</button><span></span><button data-k="ArrowLeft">◀</button><span></span><button data-k="ArrowRight">▶</button><span></span><button data-k="ArrowDown">▼</button><span></span></div>
- <div class="ab"><button data-k="c">C</button><button data-k="x">X</button><button data-k="z">Z</button></div>
-</div>
-
 <script>
-/* ===== CONFIG: adjust to match your Butterscotch Emscripten build ===== */
+/* ===== CONFIG ===== */
 const CFG={
- engine:"./butterscotch.mjs",  // Emscripten JS glue (.mjs = ES module format)
- dataPath:"/data.win",         // where data.win is placed in the engine's virtual FS
- savePath:"/saves",            // IDBFS mount for save files (file0, undertale.ini...)
- args:["/data.win"]            // command-line args passed to the runner
+ engine:"./butterscotch.mjs",
+ dataPath:"/data.win",
+ savePath:"/saves",
+ args:["/data.win"]
 };
 
-/* ===== IndexedDB for game files ===== */
+/* ===== IndexedDB ===== */
 const DB=new Promise((ok,no)=>{const r=indexedDB.open("utweb-game",1);r.onupgradeneeded=()=>r.result.createObjectStore("f");r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error)});
 const io=async(m,f)=>{const d=await DB;return new Promise((ok,no)=>{const t=d.transaction("f",m),q=f(t.objectStore("f"));t.oncomplete=()=>ok(q&&q.result);t.onerror=()=>no(t.error)})};
 const $=id=>document.getElementById(id);
 const say=(t,c)=>{const s=$("status");s.textContent=t;s.className=c||""};
 
-/* --- progress bar: drive a CSS variable, never query the pseudo-element --- */
+/* ===== Progress bar ===== */
 function setProgress(pct){
  const v=Math.max(0,Math.min(100,Number(pct)||0));
  const bar=$("progress"), txt=$("progress-text");
@@ -125,18 +128,8 @@ function showProgress(on){
  bar.classList.toggle("on",!!on);
  if(on) setProgress(0);
 }
-function showCached(){
- const c=$("cache");
- if(!c) return;
- c.textContent=" ✔ CACHED";
- c.classList.add("ready");
-}
-function hideCached(){
- const c=$("cache");
- if(!c) return;
- c.textContent="";
- c.classList.remove("ready");
-}
+function showCached(){const c=$("cache");if(!c)return;c.textContent=" ✔ CACHED";c.classList.add("ready");}
+function hideCached(){const c=$("cache");if(!c)return;c.textContent="";c.classList.remove("ready");}
 
 async function refresh(){
  let w=null;
@@ -147,10 +140,7 @@ async function refresh(){
   if(w){
    say(`✔ data.win ready (${(w.byteLength/1048576).toFixed(1)} MB) + ${Math.max(0,keys.length-1)} audio file(s)`,"ok");
    showCached();
-  } else {
-   say("Nothing loaded yet.");
-   hideCached();
-  }
+  } else { say("Nothing loaded yet."); hideCached(); }
  }catch(e){
   $("play").disabled=$("forget").disabled=true;
   say("Storage error: "+e.message,"err");
@@ -160,74 +150,32 @@ async function refresh(){
 async function ingest(list){
  list=Array.from(list||[]);
  if(!list.length) return;
- showProgress(true);
- setProgress(0);
- say("Reading files…");
-
+ showProgress(true); setProgress(0); say("Reading files…");
  let saved=0;
  const add=async(name,buf)=>{
   const base=String(name).split("/").pop().toLowerCase();
-  if(base==="data.win"||base.endsWith(".ogg")){
-   await io("readwrite",o=>o.put(buf,base));
-   saved++;
-  }
+  if(base==="data.win"||base.endsWith(".ogg")){await io("readwrite",o=>o.put(buf,base));saved++;}
  };
-
  try{
-  /* Pass 1: expand archives and count every entry we will touch */
-  const jobs=[];
-  let total=0;
+  const jobs=[]; let total=0;
   for(const f of list){
    if(/\.zip$/i.test(f.name)){
     const z=await JSZip.loadAsync(f);
     const entries=Object.values(z.files).filter(e=>!e.dir);
-    total+=entries.length;
-    jobs.push({zip:z,entries});
-   } else {
-    total++;
-    jobs.push({file:f});
-   }
+    total+=entries.length; jobs.push({zip:z,entries});
+   } else { total++; jobs.push({file:f}); }
   }
-
-  if(!total){
-   showProgress(false);
-   say("Nothing to read in that selection.","err");
-   return;
-  }
-
-  /* Pass 2: read everything, updating the bar */
+  if(!total){ showProgress(false); say("Nothing to read in that selection.","err"); return; }
   let done=0;
   for(const job of jobs){
-   if(job.zip){
-    for(const e of job.entries){
-     await add(e.name,await e.async("arraybuffer"));
-     done++; setProgress(done/total*100);
-    }
-   } else {
-    await add(job.file.webkitRelativePath||job.file.name,await job.file.arrayBuffer());
-    done++; setProgress(done/total*100);
-   }
+   if(job.zip){ for(const e of job.entries){ await add(e.name,await e.async("arraybuffer")); done++; setProgress(done/total*100); } }
+   else { await add(job.file.webkitRelativePath||job.file.name,await job.file.arrayBuffer()); done++; setProgress(done/total*100); }
   }
-
   setProgress(100);
-
-  if(saved){
-   say(`✔ ${saved} file(s) cached in your browser.`,"ok");
-   showCached();
-   setTimeout(()=>showProgress(false),500);
-  } else {
-   showProgress(false);
-   say("No data.win found in that selection.","err");
-  }
- }catch(e){
-  showProgress(false);
-  say("Couldn't read that: "+(e&&e.message||e),"err");
-  console.error(e);
- }
-
- /* allow re-picking the same files/folder */
- $("dir").value="";
- $("zip").value="";
+  if(saved){ say(`✔ ${saved} file(s) cached in your browser.`,"ok"); showCached(); setTimeout(()=>showProgress(false),500); }
+  else { showProgress(false); say("No data.win found in that selection.","err"); }
+ }catch(e){ showProgress(false); say("Couldn't read that: "+(e&&e.message||e),"err"); console.error(e); }
+ $("dir").value=""; $("zip").value="";
  await refresh();
 }
 
@@ -240,15 +188,24 @@ dz.addEventListener("drop",e=>ingest(e.dataTransfer.files));
 $("forget").onclick=async()=>{
  try{ await io("readwrite",o=>o.clear()); }catch(e){}
  $("play").disabled=$("forget").disabled=true;
- hideCached();
- showProgress(false);
- say("Files removed.");
+ hideCached(); showProgress(false); say("Files removed.");
  refresh();
 };
 
-/* ===== Launch the engine ===== */
+/* ===== Touch controls (created lazily on touch devices) ===== */
+const isTouch=matchMedia("(pointer:coarse)").matches;
+const kc={ArrowUp:38,ArrowDown:40,ArrowLeft:37,ArrowRight:39,z:90,x:88,c:67};
+const fire=(k,t)=>$("screen").dispatchEvent(new KeyboardEvent(t,{key:k,code:k.length>1?k:"Key"+k.toUpperCase(),keyCode:kc[k],which:kc[k],bubbles:true}));
+document.querySelectorAll("#pad button").forEach(b=>{
+ const k=b.dataset.k;
+ b.addEventListener("pointerdown",e=>{e.preventDefault();b.classList.add("d");fire(k,"keydown")});
+ ["pointerup","pointercancel","pointerleave"].forEach(t=>b.addEventListener(t,e=>{e.preventDefault();if(b.classList.contains("d")){b.classList.remove("d");fire(k,"keyup")}}));
+});
+
+/* ===== Launch engine ===== */
 let M=null,syncTimer=null;
 function syncOut(){if(M&&M.FS)M.FS.syncfs(false,()=>{})}
+
 $("play").onclick=async()=>{
  const w=await io("readonly",o=>o.get("data.win"));
  if(!w) return refresh();
@@ -256,36 +213,96 @@ $("play").onclick=async()=>{
  for(const k of await io("readonly",o=>o.getAllKeys())){
   if(k.endsWith(".ogg"))ogg[k]=await io("readonly",o=>o.get(k));
  }
- $("setup").style.display="none";$("stage").classList.add("on");$("screen").focus();
+ $("setup").style.display="none";
+ $("stage").classList.add("on");
+ if(isTouch)$("pad").classList.add("on");
+ $("screen").focus();
  $("msg").textContent="Loading engine…";
- try{
-  window.Module=M={
-   canvas:$("screen"),arguments:CFG.args,
-   print:t=>console.log(t),printErr:t=>console.warn(t),
-   preRun:[()=>{
-    const FS=M.FS||window.FS,IDBFS=M.IDBFS||window.IDBFS;
+
+ /* ---- Module config ---- */
+ let M=null;
+ const config={
+  canvas:$("screen"),
+  arguments:CFG.args,
+  noInitialRun:false,
+  print:t=>console.log("[game]",t),
+  printErr:t=>console.warn("[game]",t),
+  preRun:[function(){
+   try{
+    /* FS may be attached to our config object, to globalThis.Module, or (rarely) to `this` */
+    const FS=(M&&M.FS)||(globalThis.Module&&globalThis.Module.FS)||(this&&this.FS);
+    const IDBFS=(M&&M.IDBFS)||(globalThis.Module&&globalThis.Module.IDBFS)||(this&&this.IDBFS);
+    if(!FS){ console.error("[preRun] FS unavailable"); return; }
+    /* Attach the module pointer so the rest of the app can use M.FS */
     M.FS=FS;
+    /* Write game data */
     FS.writeFile(CFG.dataPath,new Uint8Array(w));
-    for(const k in ogg)FS.writeFile("/"+k,new Uint8Array(ogg[k]));
-    try{FS.mkdir(CFG.savePath)}catch(e){}
-    FS.mount(IDBFS,{},CFG.savePath);
-    M.addRunDependency("saves");
-    FS.syncfs(true,()=>M.removeRunDependency("saves"));
-   }],
-   postRun:[()=>{$("msg").textContent="";syncTimer=setInterval(syncOut,5000)}],
-   onAbort:r=>$("msg").textContent="Engine stopped: "+r
-  };
-  await import(CFG.engine);
+    let oggN=0;
+    for(const k in ogg){
+     const path="/"+k;
+     const dir=path.substring(0,path.lastIndexOf("/"))||"/";
+     if(dir!=="/"){ try{ FS.mkdirTree(dir); }catch(e){} }
+     FS.writeFile(path,new Uint8Array(ogg[k]));
+     oggN++;
+    }
+    /* Mount IDBFS for saves */
+    try{ FS.mkdir(CFG.savePath); }catch(e){}
+    if(IDBFS){
+     FS.mount(IDBFS,{},CFG.savePath);
+     M.addRunDependency("saves-sync");
+     FS.syncfs(true,err=>{
+      if(err)console.warn("[preRun] syncfs:",err);
+      M.removeRunDependency("saves-sync");
+     });
+    }
+    console.log("[preRun] OK: data.win =",w.byteLength,"bytes,",oggN,"ogg file(s)");
+   }catch(e){
+    console.error("[preRun] failed:",e);
+    $("msg").innerHTML='<span class="err">Setup failed: '+e.message+'</span>';
+   }
+  }],
+  postRun:[()=>{
+   $("msg").textContent="";
+   if(syncTimer)clearInterval(syncTimer);
+   syncTimer=setInterval(syncOut,5000);
+   console.log("[postRun] engine main() returned");
+  }],
+  onAbort:r=>{ $("msg").textContent="Engine stopped: "+r; console.error("[abort]",r); }
+ };
+ M=config;
+ globalThis.Module=config;   /* belt & braces for classic-style builds */
+
+ try{
+  const mod=await import(CFG.engine);
+  const factory=(typeof mod==="function")?mod:mod.default;
+  if(typeof factory!=="function"){
+   throw new Error("Engine module has no factory export. Check butterscotch.mjs.");
+  }
+  const result=await factory(config);
+  if(result&&typeof result==="object")M=result;
+  /* If the build didn't auto-start, call main ourselves */
+  if(M&&typeof M.callMain==="function"&&!M.calledRun){
+   try{ M.callMain(CFG.args); }catch(e){ console.warn("callMain:",e); }
+  }
   $("msg").textContent="";
+  $("screen").focus();
  }catch(e){
-  $("msg").innerHTML='<span class="err">Engine error: '+e.message+'. Make sure butterscotch.mjs and butterscotch.wasm are next to this page.</span>';
   console.error(e);
+  $("msg").innerHTML='<span class="err">Engine error: '+e.message+'</span>';
  }
 };
+
 document.addEventListener("visibilitychange",()=>{if(document.hidden)syncOut()});
 addEventListener("pagehide",syncOut);
 $("quit").onclick=()=>{syncOut();setTimeout(()=>location.reload(),300)};
-$("fs").onclick=()=>($("screen").requestFullscreen||$("screen").webkitRequestFullscreen).call($("screen"));
+
+/* Fullscreen the wrapper so the touch pad goes with the canvas */
+$("fs").onclick=()=>{
+ const el=$("gamewrap");
+ const fn=el.requestFullscreen||el.webkitRequestFullscreen;
+ if(fn) fn.call(el);
+};
+document.addEventListener("fullscreenchange",()=>{ if(document.fullscreenElement)$("screen").focus(); });
 
 /* ===== Saves: export / import ===== */
 $("exp").onclick=async()=>{
@@ -302,16 +319,6 @@ $("imp").onchange=async e=>{
  syncOut();$("msg").textContent="Saves imported. Restart the game to load them.";
 };
 
-/* ===== Touch controls ===== */
-const kc={ArrowUp:38,ArrowDown:40,ArrowLeft:37,ArrowRight:39,z:90,x:88,c:67};
-const fire=(k,t)=>$("screen").dispatchEvent(new KeyboardEvent(t,{key:k,code:k.length>1?k:"Key"+k.toUpperCase(),keyCode:kc[k],which:kc[k],bubbles:true}));
-if(matchMedia("(pointer:coarse)").matches)$("pad").classList.add("on");
-document.querySelectorAll("#pad button").forEach(b=>{
- const k=b.dataset.k;
- b.addEventListener("pointerdown",e=>{e.preventDefault();b.classList.add("d");fire(k,"keydown")});
- ["pointerup","pointercancel","pointerleave"].forEach(t=>b.addEventListener(t,e=>{e.preventDefault();if(b.classList.contains("d")){b.classList.remove("d");fire(k,"keyup")}}));
-});
-
-/* ===== Restore cached files on page load ===== */
+/* Restore cache on load */
 refresh();
 </script></body></html>

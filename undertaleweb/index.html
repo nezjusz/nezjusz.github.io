@@ -281,16 +281,23 @@ $("play").onclick=async()=>{
  const config={
   canvas:$("screen"),
   arguments:CFG.args,
-  noInitialRun:false,
+  noInitialRun:true, /* KLUCZOWA ZMIANA: nie uruchamiaj main() automatycznie */
   print:t=>console.log("[game]",t),
   printErr:t=>console.warn("[game]",t),
-  preRun:[function(){
+
+  /* FS jest gotowy dopiero tutaj — to jest właściwe miejsce na zapis plików */
+  onRuntimeInitialized:function(){
+   clearTimeout(window.__engineTimeout);
+   $("msg").textContent="Inicjalizacja systemu plików...";
    try{
-    const FS=(Mod&&Mod.FS)||(globalThis.Module&&globalThis.Module.FS)||(this&&this.FS);
-    const IDBFS=(Mod&&Mod.IDBFS)||(globalThis.Module&&globalThis.Module.IDBFS)||(this&&this.IDBFS);
-    if(!FS){ console.error("[preRun] FS unavailable"); return; }
+    const FS=this.FS;
+    if(!FS) throw new Error("FS niedostępny w onRuntimeInitialized");
     Mod.FS=FS;
+
+    /* data.win */
     FS.writeFile(CFG.dataPath,new Uint8Array(w));
+
+    /* pliki .ogg */
     let oggN=0;
     for(const k in ogg){
      const path="/"+k;
@@ -299,25 +306,37 @@ $("play").onclick=async()=>{
      FS.writeFile(path,new Uint8Array(ogg[k]));
      oggN++;
     }
+    console.log("[FS] OK: data.win =",w.byteLength,"bytes,",oggN,"ogg file(s)");
+
+    /* IDBFS dla zapisów */
     try{ FS.mkdir(CFG.savePath); }catch(e){}
+    const IDBFS=this.IDBFS;
     if(IDBFS){
      FS.mount(IDBFS,{},CFG.savePath);
-     try{ FS.syncfs(true,err=>{ if(err) console.warn("[preRun] syncfs initial:",err); }); }catch(e){}
+     try{ FS.syncfs(true,err=>{ if(err) console.warn("[syncfs]",err); }); }catch(e){}
     }
-    console.log("[preRun] OK: data.win =",w.byteLength,"bytes,",oggN,"ogg file(s)");
+
+    /* Ręcznie uruchamiamy grę */
+    $("msg").textContent="Uruchamianie gry...";
+    if(typeof this.callMain==="function"){
+     this.callMain(CFG.args);
+    } else {
+     console.warn("[onRuntimeInitialized] callMain niedostępny");
+    }
+    $("msg").textContent="";
    }catch(e){
-    console.error("[preRun] failed:",e);
-    $("msg").innerHTML='<span class="err">Setup failed: '+e.message+'</span>';
+    console.error("[onRuntimeInitialized] failed:",e);
+    $("msg").innerHTML='<span class="err">Błąd inicjalizacji FS: '+e.message+'</span>';
    }
-  }],
+  },
+
   postRun:[()=>{
    clearTimeout(window.__engineTimeout);
-   $("msg").textContent="";
    if(syncTimer)clearInterval(syncTimer);
    syncTimer=setInterval(syncOut,5000);
    console.log("[postRun] engine main() returned");
   }],
-  onRuntimeInitialized:()=>{ clearTimeout(window.__engineTimeout); },
+
   onAbort:r=>{
    clearTimeout(window.__engineTimeout);
    $("msg").innerHTML='<span class="err">Engine stopped: '+r+'</span>';
@@ -331,7 +350,7 @@ $("play").onclick=async()=>{
   const d2=await diagnoseEngine();
   $("msg").innerHTML='<span class="err">Silnik zawiesił się w trakcie ładowania.</span>';
   showDiag(renderDiag(d2)+"\n\n<b>Wskazówka:</b> sprawdź w DevTools → Network, czy wasm ma Content-Type: application/wasm, oraz czy strona ma nagłówki COOP/COEP (Application → Frames → Headers).");
- },20000);
+ },25000);
 
  try{
   const mod=await import(CFG.engine);
@@ -342,12 +361,6 @@ $("play").onclick=async()=>{
   }
   const result=await factory(config);
   if(result&&typeof result==="object")Mod=result;
-  if(Mod&&typeof Mod.callMain==="function"&&!Mod.calledRun){
-   try{ Mod.callMain(CFG.args); }catch(e){ console.warn("callMain:",e); }
-  }
-  clearTimeout(window.__engineTimeout);
-  $("msg").textContent="";
-  $("screen").focus();
  }catch(e){
   clearTimeout(window.__engineTimeout);
   console.error(e);

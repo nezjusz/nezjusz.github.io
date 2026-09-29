@@ -16,7 +16,7 @@ const CONFIG = {
   DB_NAME: 'UndertaleWebPlayer',
   DB_VERSION: 1,
   STORE_NAME: 'gameFiles',
-  WASM_URL: 'https://butterscotch.mrpowergamerbr.com/web/butterscotch.mjs',
+  WASM_URL: './butterscotch.mjs',
   // Alternatywnie: localny plik ./butterscotch.mjs
 };
 

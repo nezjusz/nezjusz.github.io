@@ -2,13 +2,13 @@
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Undertale Web</title>
+<script src="coi-serviceworker.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <style>
 :root{--bg:#050508;--fg:#fff;--dim:#8a8a99;--acc:#ffe600;--red:#ff2a3c;--line:#fff;
---px:"Press Start 2P","Courier New",monospace;--tx:"VT323","Courier New",monospace;
-box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+--px:"Press Start 2P","Courier New",monospace;--tx:"VT323","Courier New",monospace}
 *{box-sizing:border-box}
 html,body{height:100%;margin:0}
 body{background:radial-gradient(ellipse at 50% 0,#14142a 0,var(--bg) 60%);color:var(--fg);font:22px/1.3 var(--tx);overflow-x:hidden}
@@ -27,7 +27,6 @@ h1{font:28px/1.4 var(--px);margin:12px 0 4px;letter-spacing:2px;text-shadow:3px 
 .drop.over,.drop:hover{border-color:var(--acc);background:#15140a}
 .btn{font:11px/1 var(--px);color:var(--fg);background:#000;border:3px solid var(--fg);padding:12px 14px;margin:5px 5px 5px 0;cursor:pointer;display:inline-block;text-transform:uppercase}
 .btn:hover,.btn:focus{color:var(--acc);border-color:var(--acc);outline:none}
-.btn:hover::before{content:"❤ ";color:var(--red)}
 .btn.go{color:#000;background:var(--acc);border-color:var(--acc)}
 .btn[disabled]{opacity:.35;pointer-events:none}
 input[type=file]{display:none}
@@ -46,14 +45,17 @@ input[type=file]{display:none}
 #progress-text{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font:10px var(--px);z-index:1;color:#fff;text-shadow:1px 1px 0 #000,-1px -1px 0 #000}
 .cache-status{display:inline-block;padding:2px 6px;border:1px solid var(--dim);font-size:11px;color:var(--dim);margin-left:8px}
 .cache-status.ready{border-color:var(--acc);color:var(--acc)}
-#pad{display:none;position:absolute;left:0;right:0;bottom:0;padding:10px 14px calc(10px + env(safe-area-inset-bottom,0px));justify-content:space-between;align-items:flex-end;pointer-events:none;user-select:none;-webkit-user-select:none;touch-action:none;z-index:9}
+#pad{display:none;position:absolute;left:0;right:0;bottom:0;padding:10px 14px;justify-content:space-between;align-items:flex-end;pointer-events:none;user-select:none;-webkit-user-select:none;touch-action:none;z-index:9}
 #pad.on{display:flex}
-#pad button{pointer-events:auto;touch-action:none;width:60px;height:60px;border-radius:50%;border:3px solid #fff;background:rgba(0,0,0,.65);color:#fff;font:14px var(--px);backdrop-filter:blur(4px)}
+#pad button{pointer-events:auto;touch-action:none;width:56px;height:56px;border-radius:50%;border:3px solid #fff;background:rgba(0,0,0,.65);color:#fff;font:14px var(--px)}
 #pad button:active,#pad button.d{background:var(--acc);color:#000;border-color:var(--acc)}
-.dp{display:grid;grid-template-columns:repeat(3,60px);gap:4px}
-.ab{display:flex;gap:10px;align-items:flex-end}
-.ab button:nth-child(2){margin-bottom:26px}
+.dp{display:grid;grid-template-columns:repeat(3,56px);gap:4px}
+.ab{display:flex;gap:8px;align-items:flex-end}
+.ab button:nth-child(2){margin-bottom:24px}
 footer{text-align:center;color:var(--dim);font-size:18px;margin-top:28px}
+#diag{white-space:pre-wrap;font:14px/1.35 "Courier New",monospace;background:#0a0a0a;border:2px solid #333;padding:10px;margin-top:10px;display:none;color:#ccc}
+#diag.on{display:block}
+#diag b{color:var(--acc)}
 @media(prefers-reduced-motion:reduce){*{animation:none!important}}
 </style></head><body>
 <main>
@@ -95,6 +97,7 @@ footer{text-align:center;color:var(--dim);font-size:18px;margin-top:28px}
   <button class="btn" id="quit">Quit</button>
  </div>
  <div id="msg" class="sub"></div>
+ <div id="diag"></div>
 </section>
 <footer>Unofficial fan project · you must own Undertale · not affiliated with tobyfox</footer>
 </main>
@@ -103,6 +106,7 @@ footer{text-align:center;color:var(--dim);font-size:18px;margin-top:28px}
 /* ===== CONFIG ===== */
 const CFG={
  engine:"./butterscotch.mjs",
+ wasm:"./butterscotch.wasm",
  dataPath:"/data.win",
  savePath:"/saves",
  args:["/data.win"]
@@ -114,21 +118,18 @@ const io=async(m,f)=>{const d=await DB;return new Promise((ok,no)=>{const t=d.tr
 const $=id=>document.getElementById(id);
 const say=(t,c)=>{const s=$("status");s.textContent=t;s.className=c||""};
 
-/* ===== Progress bar ===== */
 function setProgress(pct){
  const v=Math.max(0,Math.min(100,Number(pct)||0));
  const bar=$("progress"), txt=$("progress-text");
  if(bar) bar.style.setProperty("--prog",v+"%");
  if(txt) txt.textContent=Math.round(v)+"%";
 }
-function showProgress(on){
- const bar=$("progress");
- if(!bar) return;
- bar.classList.toggle("on",!!on);
- if(on) setProgress(0);
-}
+function showProgress(on){const bar=$("progress");if(!bar)return;bar.classList.toggle("on",!!on);if(on)setProgress(0);}
 function showCached(){const c=$("cache");if(!c)return;c.textContent=" ✔ CACHED";c.classList.add("ready");}
 function hideCached(){const c=$("cache");if(!c)return;c.textContent="";c.classList.remove("ready");}
+
+function showDiag(text){const d=$("diag");if(!d)return;d.innerHTML=text;d.classList.add("on");}
+function hideDiag(){const d=$("diag");if(d)d.classList.remove("on");}
 
 async function refresh(){
  let w=null;
@@ -191,7 +192,7 @@ $("forget").onclick=async()=>{
  refresh();
 };
 
-/* ===== Touch controls ===== */
+/* ===== Touch ===== */
 const isTouch=matchMedia("(pointer:coarse)").matches;
 const kc={ArrowUp:38,ArrowDown:40,ArrowLeft:37,ArrowRight:39,z:90,x:88,c:67};
 const fire=(k,t)=>$("screen").dispatchEvent(new KeyboardEvent(t,{key:k,code:k.length>1?k:"Key"+k.toUpperCase(),keyCode:kc[k],which:kc[k],bubbles:true}));
@@ -201,7 +202,54 @@ document.querySelectorAll("#pad button").forEach(b=>{
  ["pointerup","pointercancel","pointerleave"].forEach(t=>b.addEventListener(t,e=>{e.preventDefault();if(b.classList.contains("d")){b.classList.remove("d");fire(k,"keyup")}}));
 });
 
-/* ===== Launch engine ===== */
+/* ===== Preflight ===== */
+async function diagnoseEngine(){
+ const out={mjs:null,wasm:null,ok:false,isolated:self.crossOriginIsolated===true};
+ try{
+  const r=await fetch(CFG.engine,{cache:"no-store"});
+  const t=await r.text();
+  out.mjs={status:r.status,size:t.length,hasExportDefault:/export\s+default|Module\s*=/.test(t),preview:t.slice(0,60).replace(/\s+/g," ")};
+ }catch(e){ out.mjs={error:e.message}; }
+ try{
+  const r=await fetch(CFG.wasm,{cache:"no-store"});
+  const buf=new Uint8Array(await r.arrayBuffer());
+  const magic=Array.from(buf.slice(0,4)).map(b=>b.toString(16).padStart(2,"0")).join(" ");
+  const isWasm = buf[0]===0x00 && buf[1]===0x61 && buf[2]===0x73 && buf[3]===0x6d;
+  out.wasm={status:r.status,size:buf.length,magic,isWasm,preview: isWasm ? "(binary — OK)" : new TextDecoder().decode(buf.slice(0,80)).replace(/\s+/g," ")};
+ }catch(e){ out.wasm={error:e.message}; }
+ out.ok = !!(out.mjs && !out.mjs.error && out.mjs.hasExportDefault && out.wasm && !out.wasm.error && out.wasm.isWasm);
+ return out;
+}
+
+function renderDiag(d){
+ let html="<b>DIAGNOSTYKA SILNIKA</b>\n\n";
+ html+=`crossOriginIsolated: ${d.isolated?"✔ TAK":"✗ NIE — to blokuje SharedArrayBuffer i wątki"}\n`;
+ if(!d.isolated) html+=`  → coi-serviceworker.js musi być załadowany w <head> i musi przeładować stronę raz.\n`;
+ html+="\nbutterscotch.mjs\n";
+ if(d.mjs.error) html+=`  ✗ błąd pobierania: ${d.mjs.error}\n`;
+ else {
+  html+=`  status HTTP:    ${d.mjs.status}\n`;
+  html+=`  rozmiar:        ${d.mjs.size} B\n`;
+  html+=`  eksport modułu: ${d.mjs.hasExportDefault?"✔ tak":"✗ NIE"}\n`;
+  html+=`  początek:       ${d.mjs.preview}…\n`;
+ }
+ html+="\nbutterscotch.wasm\n";
+ if(d.wasm.error) html+=`  ✗ błąd pobierania: ${d.wasm.error}\n`;
+ else {
+  html+=`  status HTTP:     ${d.wasm.status}\n`;
+  html+=`  rozmiar:         ${d.wasm.size} B\n`;
+  html+=`  pierwsze 4 bajty: ${d.wasm.magic}\n`;
+  if(d.wasm.isWasm) html+=`  ✔ to jest prawidłowy plik WebAssembly (00 61 73 6d)\n`;
+  else html+=`  ✗ TO NIE JEST PLIK WASM. Powinno być: 00 61 73 6d\n  zamiast tego: ${d.wasm.preview}…\n`;
+ }
+ html+="\n";
+ if(d.ok && d.isolated) html+="<b>✔ Wszystko OK — silnik powinien się załadować.</b>";
+ else if(!d.isolated) html+="<b>✗ Brak izolacji cross-origin. Dodaj coi-serviceworker.js i przeładuj stronę.</b>";
+ else html+="<b>✗ Silnik nie może się załadować — patrz wyżej.</b>";
+ return html;
+}
+
+/* ===== Launch ===== */
 let M=null,syncTimer=null;
 function syncOut(){if(M&&M.FS)M.FS.syncfs(false,()=>{})}
 
@@ -212,10 +260,21 @@ $("play").onclick=async()=>{
  for(const k of await io("readonly",o=>o.getAllKeys())){
   if(k.endsWith(".ogg"))ogg[k]=await io("readonly",o=>o.get(k));
  }
+
  $("setup").style.display="none";
  $("stage").classList.add("on");
  if(isTouch)$("pad").classList.add("on");
  $("screen").focus();
+ hideDiag();
+ $("msg").textContent="Sprawdzam pliki silnika…";
+
+ const d=await diagnoseEngine();
+ if(!d.ok || !d.isolated){
+  $("msg").innerHTML='<span class="err">Silnik nie może się załadować.</span>';
+  showDiag(renderDiag(d));
+  return;
+ }
+ hideDiag();
  $("msg").textContent="Loading engine…";
 
  let Mod=null;
@@ -231,8 +290,6 @@ $("play").onclick=async()=>{
     const IDBFS=(Mod&&Mod.IDBFS)||(globalThis.Module&&globalThis.Module.IDBFS)||(this&&this.IDBFS);
     if(!FS){ console.error("[preRun] FS unavailable"); return; }
     Mod.FS=FS;
-
-    /* Wpisujemy pliki gry do wirtualnego systemu */
     FS.writeFile(CFG.dataPath,new Uint8Array(w));
     let oggN=0;
     for(const k in ogg){
@@ -242,15 +299,10 @@ $("play").onclick=async()=>{
      FS.writeFile(path,new Uint8Array(ogg[k]));
      oggN++;
     }
-
-    /* Montujemy IDBFS, ale NIE czekamy na synchronizację – start gry nie może być zablokowany */
     try{ FS.mkdir(CFG.savePath); }catch(e){}
     if(IDBFS){
      FS.mount(IDBFS,{},CFG.savePath);
-     /* Sync w tle – jeśli się nie uda, gra i tak ruszy */
-     try{
-      FS.syncfs(true,err=>{ if(err) console.warn("[preRun] syncfs initial:",err); });
-     }catch(e){ console.warn("[preRun] syncfs threw:",e); }
+     try{ FS.syncfs(true,err=>{ if(err) console.warn("[preRun] syncfs initial:",err); }); }catch(e){}
     }
     console.log("[preRun] OK: data.win =",w.byteLength,"bytes,",oggN,"ogg file(s)");
    }catch(e){
@@ -259,32 +311,49 @@ $("play").onclick=async()=>{
    }
   }],
   postRun:[()=>{
+   clearTimeout(window.__engineTimeout);
    $("msg").textContent="";
    if(syncTimer)clearInterval(syncTimer);
    syncTimer=setInterval(syncOut,5000);
    console.log("[postRun] engine main() returned");
   }],
-  onAbort:r=>{ $("msg").textContent="Engine stopped: "+r; console.error("[abort]",r); }
+  onRuntimeInitialized:()=>{ clearTimeout(window.__engineTimeout); },
+  onAbort:r=>{
+   clearTimeout(window.__engineTimeout);
+   $("msg").innerHTML='<span class="err">Engine stopped: '+r+'</span>';
+   console.error("[abort]",r);
+  }
  };
  Mod=config;
  globalThis.Module=config;
+
+ window.__engineTimeout=setTimeout(async()=>{
+  const d2=await diagnoseEngine();
+  $("msg").innerHTML='<span class="err">Silnik zawiesił się w trakcie ładowania.</span>';
+  showDiag(renderDiag(d2)+"\n\n<b>Wskazówka:</b> sprawdź w DevTools → Network, czy wasm ma Content-Type: application/wasm, oraz czy strona ma nagłówki COOP/COEP (Application → Frames → Headers).");
+ },20000);
 
  try{
   const mod=await import(CFG.engine);
   const factory=(typeof mod==="function")?mod:mod.default;
   if(typeof factory!=="function"){
-   throw new Error("Engine module has no factory export. Check butterscotch.mjs.");
+   clearTimeout(window.__engineTimeout);
+   throw new Error("Engine module has no default export.");
   }
   const result=await factory(config);
   if(result&&typeof result==="object")Mod=result;
   if(Mod&&typeof Mod.callMain==="function"&&!Mod.calledRun){
    try{ Mod.callMain(CFG.args); }catch(e){ console.warn("callMain:",e); }
   }
+  clearTimeout(window.__engineTimeout);
   $("msg").textContent="";
   $("screen").focus();
  }catch(e){
+  clearTimeout(window.__engineTimeout);
   console.error(e);
   $("msg").innerHTML='<span class="err">Engine error: '+e.message+'</span>';
+  const d3=await diagnoseEngine();
+  showDiag(renderDiag(d3));
  }
 };
 
@@ -292,7 +361,6 @@ document.addEventListener("visibilitychange",()=>{if(document.hidden)syncOut()})
 addEventListener("pagehide",syncOut);
 $("quit").onclick=()=>{syncOut();setTimeout(()=>location.reload(),300)};
 
-/* Fullscreen na całym wrapperze, żeby pad został widoczny */
 $("fs").onclick=()=>{
  const el=$("gamewrap");
  const fn=el.requestFullscreen||el.webkitRequestFullscreen;
@@ -300,7 +368,6 @@ $("fs").onclick=()=>{
 };
 document.addEventListener("fullscreenchange",()=>{ if(document.fullscreenElement)$("screen").focus(); });
 
-/* ===== Saves: export / import ===== */
 $("exp").onclick=async()=>{
  if(!M||!M.FS)return;const FS=M.FS,z=new JSZip();
  for(const f of FS.readdir(CFG.savePath))if(f!=="."&&f!=="..")z.file(f,FS.readFile(CFG.savePath+"/"+f));
@@ -315,6 +382,5 @@ $("imp").onchange=async e=>{
  syncOut();$("msg").textContent="Saves imported. Restart the game to load them.";
 };
 
-/* Restore cache on load */
 refresh();
 </script></body></html>

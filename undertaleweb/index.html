@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Undertale Web</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+:root{--bg:#050508;--fg:#fff;--dim:#8a8a99;--acc:#ffe600;--red:#ff2a3c;--line:#fff;
+--px:"Press Start 2P","Courier New",monospace;--tx:"VT323","Courier New",monospace;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:radial-gradient(ellipse at 50% 0,#14142a 0,var(--bg) 60%);color:var(--fg);font:22px/1.3 var(--tx);overflow-x:hidden}
+body::before{content:"";position:fixed;inset:0;background-image:radial-gradient(#fff 1px,transparent 1.5px),radial-gradient(#8af 1px,transparent 1.5px);background-size:120px 120px,190px 190px;background-position:0 0,60px 80px;opacity:.18;animation:drift 90s linear infinite;pointer-events:none}
+@keyframes drift{to{background-position:0 1200px,60px 1280px}}
+main{position:relative;max-width:760px;margin:auto;padding:28px 16px 140px}
+header{text-align:center;margin-bottom:24px}
+h1{font:28px/1.4 var(--px);margin:12px 0 4px;letter-spacing:2px;text-shadow:3px 3px 0 #333}
+.sub{color:var(--dim)}
+.heart{width:44px;height:44px;image-rendering:pixelated;animation:beat 1.4s steps(2) infinite;filter:drop-shadow(0 0 10px var(--red))}
+@keyframes beat{50%{transform:scale(1.15)}}
+.box{border:4px solid var(--line);background:#000;padding:18px;margin:18px 0;position:relative}
+.box h2{font:13px/1.6 var(--px);color:var(--acc);margin:0 0 10px}
+.drop{border-style:dashed;text-align:center;cursor:pointer;transition:.15s}
+.drop.over,.drop:hover{border-color:var(--acc);background:#15140a}
+.btn{font:11px/1 var(--px);color:var(--fg);background:#000;border:3px solid var(--fg);padding:12px 14px;margin:5px 5px 5px 0;cursor:pointer;display:inline-block;text-transform:uppercase}
+.btn:hover,.btn:focus{color:var(--acc);border-color:var(--acc);outline:none}
+.btn:hover::before{content:"❤ ";color:var(--red)}
+.btn.go{color:#000;background:var(--acc);border-color:var(--acc)}
+.btn[disabled]{opacity:.35;pointer-events:none}
+input[type=file]{display:none}
+#status{color:var(--dim);min-height:1.4em}
+.ok{color:#5f5}.err{color:var(--red)}
+#stage{display:none}
+#stage.on{display:block}
+#screen{width:100%;aspect-ratio:4/3;background:#000;border:4px solid var(--fg);box-shadow:0 0 40px #4a4aff33;display:block;image-rendering:pixelated;outline:none}
+.bar{margin-top:8px}
+#pad{display:none;position:fixed;left:0;right:0;bottom:0;padding:10px 14px calc(10px + env(safe-area-inset-bottom,0px));justify-content:space-between;align-items:flex-end;pointer-events:none;user-select:none;-webkit-user-select:none;touch-action:none;z-index:9}
+#pad.on{display:flex}
+#pad button{pointer-events:auto;touch-action:none;width:60px;height:60px;border-radius:50%;border:3px solid #fff;background:rgba(0,0,0,.65);color:#fff;font:14px var(--px);backdrop-filter:blur(4px)}
+#pad button:active,#pad button.d{background:var(--acc);color:#000;border-color:var(--acc)}
+.dp{display:grid;grid-template-columns:repeat(3,60px);gap:4px}
+.ab{display:flex;gap:10px;align-items:flex-end}
+.ab button:nth-child(2){margin-bottom:26px}
+footer{text-align:center;color:var(--dim);font-size:18px;margin-top:28px}
+@media(prefers-reduced-motion:reduce){*{animation:none!important}}
+</style></head><body>
+<main>
+<header>
+ <svg class="heart" viewBox="0 0 9 8" shape-rendering="crispEdges"><path fill="#ff2a3c" d="M1 0h2v1h1v1h1V1h1V0h2v1h1v3H8v1H7v1H6v1H5v1H4V7H3V6H2V5H1V4H0V1h1z"/></svg>
+ <h1>UNDERTALE</h1>
+ <div class="sub">Web player · bring your own game files</div>
+</header>
+
+<section id="setup">
+ <div class="box drop" id="drop">
+  <h2>* Step 1: Your game files</h2>
+  Drop your Steam Undertale folder or a zip here,<br>or choose below. Only <b>data.win</b> and the <b>.ogg</b> files are used.<br>
+  <label class="btn">Folder<input id="dir" type="file" webkitdirectory multiple></label>
+  <label class="btn">Zip / files<input id="zip" type="file" multiple accept=".zip,.win,.ogg"></label>
+  <div id="status">Nothing loaded yet.</div>
+ </div>
+ <div class="box">
+  <h2>* Step 2: Play</h2>
+  <button class="btn go" id="play" disabled>Start game</button>
+  <button class="btn" id="forget" disabled>Forget files</button>
+  <div class="sub">Your files never leave this device. They're kept in your browser so you only load them once.</div>
+ </div>
+</section>
+
+<section id="stage">
+ <canvas id="screen" width="640" height="480" tabindex="0"></canvas>
+ <div class="bar">
+  <button class="btn" id="fs">Fullscreen</button>
+  <button class="btn" id="exp">Download saves</button>
+  <label class="btn">Import saves<input id="imp" type="file" multiple accept=".zip,*"></label>
+  <button class="btn" id="quit">Quit</button>
+ </div>
+ <div id="msg" class="sub"></div>
+</section>
+<footer>Unofficial fan project · you must own Undertale · not affiliated with tobyfox</footer>
+</main>
+
+<div id="pad">
+ <div class="dp"><span></span><button data-k="ArrowUp">▲</button><span></span><button data-k="ArrowLeft">◀</button><span></span><button data-k="ArrowRight">▶</button><span></span><button data-k="ArrowDown">▼</button><span></span></div>
+ <div class="ab"><button data-k="c">C</button><button data-k="x">X</button><button data-k="z">Z</button></div>
+</div>
+
+<script>
+/* ===== CONFIG: adjust to match your Butterscotch Emscripten build ===== */
+const CFG={
+ engine:"./butterscotch.js",   // Emscripten JS glue (its .wasm must sit beside it)
+ dataPath:"/data.win",         // where data.win is placed in the engine's virtual FS
+ savePath:"/saves",            // IDBFS mount for save files (file0, undertale.ini...)
+ args:["/data.win"]            // command-line args passed to the runner
+};
+
+/* ===== IndexedDB for game files ===== */
+const DB=new Promise((ok,no)=>{const r=indexedDB.open("utweb-game",1);r.onupgradeneeded=()=>r.result.createObjectStore("f");r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error)});
+const io=async(m,f)=>{const d=await DB;return new Promise((ok,no)=>{const t=d.transaction("f",m),q=f(t.objectStore("f"));t.oncomplete=()=>ok(q&&q.result);t.onerror=()=>no(t.error)})};
+const $=id=>document.getElementById(id);
+const say=(t,c)=>{const s=$("status");s.textContent=t;s.className=c||""};
+
+async function refresh(){
+ const w=await io("readonly",o=>o.get("data.win")), n=(await io("readonly",o=>o.getAllKeys())).length;
+ $("play").disabled=$("forget").disabled=!w;
+ if(w)say(`✔ data.win ready (${(w.byteLength/1048576).toFixed(1)} MB) + ${n-1} audio file(s)`,"ok");
+}
+async function ingest(list){
+ let n=0; say("Reading files…");
+ const add=async(name,buf)=>{const b=name.split("/").pop().toLowerCase();if(b==="data.win"||b.endsWith(".ogg")){await io("readwrite",o=>o.put(buf,b));n++}};
+ try{for(const f of list){
+  if(f.name.toLowerCase().endsWith(".zip")){const z=await JSZip.loadAsync(f);for(const e of Object.values(z.files))if(!e.dir)await add(e.name,await e.async("arraybuffer"))}
+  else await add(f.webkitRelativePath||f.name,await f.arrayBuffer());
+ }}catch(e){return say("Couldn't read that: "+e.message,"err")}
+ n?refresh():say("No data.win found in that selection.","err");
+}
+$("dir").onchange=e=>ingest(e.target.files);
+$("zip").onchange=e=>ingest(e.target.files);
+const dz=$("drop");
+["dragover","dragenter"].forEach(t=>dz.addEventListener(t,e=>{e.preventDefault();dz.classList.add("over")}));
+["dragleave","drop"].forEach(t=>dz.addEventListener(t,e=>{e.preventDefault();dz.classList.remove("over")}));
+dz.addEventListener("drop",e=>ingest(e.dataTransfer.files));
+$("forget").onclick=async()=>{await io("readwrite",o=>o.clear());$("play").disabled=$("forget").disabled=true;say("Files removed.")};
+
+/* ===== Launch the engine ===== */
+let M=null,syncTimer=null;
+function syncOut(){if(M&&M.FS)M.FS.syncfs(false,()=>{})}
+$("play").onclick=async()=>{
+ const w=await io("readonly",o=>o.get("data.win"));
+ const ogg={};for(const k of await io("readonly",o=>o.getAllKeys()))if(k.endsWith(".ogg"))ogg[k]=await io("readonly",o=>o.get(k));
+ $("setup").style.display="none";$("stage").classList.add("on");$("screen").focus();
+ $("msg").textContent="Loading engine…";
+ window.Module=M={
+  canvas:$("screen"),arguments:CFG.args,
+  print:t=>console.log(t),printErr:t=>console.warn(t),
+  preRun:[()=>{
+   const FS=M.FS||window.FS,IDBFS=M.IDBFS||window.IDBFS;
+   M.FS=FS;
+   FS.writeFile(CFG.dataPath,new Uint8Array(w));
+   for(const k in ogg)FS.writeFile("/"+k,new Uint8Array(ogg[k]));
+   try{FS.mkdir(CFG.savePath)}catch(e){}
+   FS.mount(IDBFS,{},CFG.savePath);
+   M.addRunDependency("saves");
+   FS.syncfs(true,()=>M.removeRunDependency("saves"));
+  }],
+  postRun:[()=>{$("msg").textContent="";syncTimer=setInterval(syncOut,5000)}],
+  onAbort:r=>$("msg").textContent="Engine stopped: "+r
+ };
+ const s=document.createElement("script");s.src=CFG.engine;
+ s.onerror=()=>{$("msg").innerHTML='<span class="err">Engine not found. Put the Butterscotch web build (butterscotch.js + .wasm) next to this page. See the config block at the top of the script.</span>'};
+ document.body.appendChild(s);
+};
+document.addEventListener("visibilitychange",()=>{if(document.hidden)syncOut()});
+addEventListener("pagehide",syncOut);
+$("quit").onclick=()=>{syncOut();setTimeout(()=>location.reload(),300)};
+$("fs").onclick=()=>($("screen").requestFullscreen||$("screen").webkitRequestFullscreen).call($("screen"));
+
+/* ===== Saves: export / import ===== */
+$("exp").onclick=async()=>{
+ if(!M||!M.FS)return;const FS=M.FS,z=new JSZip();
+ for(const f of FS.readdir(CFG.savePath))if(f!=="."&&f!=="..")z.file(f,FS.readFile(CFG.savePath+"/"+f));
+ const a=document.createElement("a");a.href=URL.createObjectURL(await z.generateAsync({type:"blob"}));a.download="undertale-saves.zip";a.click();
+};
+$("imp").onchange=async e=>{
+ if(!M||!M.FS)return;const FS=M.FS,put=(n,b)=>FS.writeFile(CFG.savePath+"/"+n.split("/").pop(),new Uint8Array(b));
+ for(const f of e.target.files){
+  if(f.name.endsWith(".zip")){const z=await JSZip.loadAsync(f);for(const x of Object.values(z.files))if(!x.dir)put(x.name,await x.async("arraybuffer"))}
+  else put(f.name,await f.arrayBuffer());
+ }
+ syncOut();$("msg").textContent="Saves imported. Restart the game to load them.";
+};
+
+/* ===== Touch controls ===== */
+const kc={ArrowUp:38,ArrowDown:40,ArrowLeft:37,ArrowRight:39,z:90,x:88,c:67};
+const fire=(k,t)=>$("screen").dispatchEvent(new KeyboardEvent(t,{key:k,code:k.length>1?k:"Key"+k.toUpperCase(),keyCode:kc[k],which:kc[k],bubbles:true}));
+if(matchMedia("(pointer:coarse)").matches)$("pad").classList.add("on");
+document.querySelectorAll("#pad button").forEach(b=>{
+ const k=b.dataset.k;
+ b.addEventListener("pointerdown",e=>{e.preventDefault();b.classList.add("d");fire(k,"keydown")});
+ ["pointerup","pointercancel","pointerleave"].forEach(t=>b.addEventListener(t,e=>{e.preventDefault();if(b.classList.contains("d")){b.classList.remove("d");fire(k,"keyup")}}));
+});
+</script></body></html>

@@ -297,22 +297,28 @@ async function copyFilesToOPFS() {
 
   if (!navigator.storage || !navigator.storage.getDirectory) {
     screenLog("[WRN] OPFS niedostępne – pomijam montowanie.");
-    return "/game";
+    return { gameDir: "/game", savesDir: "/saves" };
   }
 
-  const root = await navigator.storage.getDirectory();
-  const gameDir = await root.getDirectoryHandle("game", { create: true });
+  try {
+    const root = await navigator.storage.getDirectory();
+    const gameDir = await root.getDirectoryHandle("game", { create: true });
+    const savesDir = await root.getDirectoryHandle("saves", { create: true });
 
-  for (const f of files) {
-    const fileHandle = await gameDir.getFileHandle(f.name, { create: true });
-    const writable = await fileHandle.createWritable();
-    await writable.write(f.data);
-    await writable.close();
-    screenLog(`[OPFS] Skopiowano: ${f.name}`);
+    for (const f of files) {
+      const fileHandle = await gameDir.getFileHandle(f.name, { create: true });
+      const writable = await fileHandle.createWritable();
+      await writable.write(f.data);
+      await writable.close();
+      screenLog(`[OPFS] Skopiowano: ${f.name}`);
+    }
+
+    screenLog("[OPFS] Wszystkie pliki skopiowane.");
+    return { gameDir: "/game", savesDir: "/saves" };
+  } catch (err) {
+    screenLog("[ERR] Błąd OPFS:", err && err.message ? err.message : err);
+    throw err;
   }
-
-  screenLog("[OPFS] Wszystkie pliki skopiowane.");
-  return "/game";
 }
 
 async function startGame() {
@@ -332,7 +338,10 @@ async function startGame() {
     canvas.height = 480;
     screenLog(`[CANVAS] Wymiary canvas: ${canvas.width}x${canvas.height}`);
 
-    const opfsDir = await copyFilesToOPFS();
+    // CRITICAL FIX: Copy files to OPFS BEFORE initializing WASM module
+    screenLog("[WASM] Przygotowywanie OPFS...");
+    const { gameDir, savesDir } = await copyFilesToOPFS();
+    screenLog(`[WASM] Ścieżki: gameDir=${gameDir}, savesDir=${savesDir}`);
 
     screenLog("[WASM] Importowanie modułu...");
     let wasmModule;
@@ -345,12 +354,17 @@ async function startGame() {
 
     screenLog("[WASM] Inicjalizacja modułu...");
 
-    // CRITICAL: Do NOT create WebGL context before module init
-    // Module init must be the ONLY owner of the canvas
+    // CRITICAL FIX: Pass canvas, gamePath, and savesPath to the Butterscotch module
+    // These are REQUIRED for proper initialization
     const moduleInstance = await wasmModule.default({
       canvas,
+      gamePath: gameDir,
+      savesPath: savesDir,
       print: (text) => screenLog("[GAME]", text),
       printErr: (text) => screenLog("[GAME-ERR]", text),
+      onRuntimeInitialized: () => {
+        screenLog("[WASM] Runtime zainicjalizowany");
+      }
     });
 
     if (!moduleInstance) {
@@ -358,13 +372,9 @@ async function startGame() {
     }
 
     engineModule = moduleInstance;
-    screenLog("[OK] Moduł WASM załadowany");
+    screenLog("[OK] Moduł WASM załadowany i uruchomiony");
 
-    // The module auto-starts the runner during init
-    // DO NOT call _startRunner again - it's already running
-    // The gamePath=(null) issue is because Butterscotch auto-runs without real paths
-    // This is expected behavior - the module handles its own lifecycle
-
+    // The module should now be running the game
     screenLog("[OK] Gra powinna być uruchomiona. Sprawdzenie w logach gry powyżej.");
   } catch (err) {
     const msg = err && err.message ? err.message : String(err);

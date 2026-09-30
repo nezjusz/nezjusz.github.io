@@ -38,6 +38,7 @@ const logLines = [];
  * @param {...any} args
  */
 function screenLog(...args) {
+  if (!logOutput) return;
   const text = args
     .map((a) => (typeof a === "string" ? a : JSON.stringify(a, null, 2)))
     .join(" ");
@@ -46,7 +47,6 @@ function screenLog(...args) {
   for (const line of lines) {
     logLines.push(line);
   }
-  // Ogranicz liczbę linii
   while (logLines.length > MAX_LOG_LINES) logLines.shift();
 
   logOutput.textContent = logLines.join("\n");
@@ -129,7 +129,7 @@ async function getAllFilesFromDB() {
     const tx = db.transaction(CONFIG.STORE_NAME, "readonly");
     const store = tx.objectStore(CONFIG.STORE_NAME);
     const request = store.getAll();
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => resolve(request.result || []);
     request.onerror = () => reject(request.error);
   });
 }
@@ -177,15 +177,17 @@ const storageStatus = document.getElementById("storage-status");
 /** Sprawdza, czy plik jest akceptowalny (data.win / .ogg / .zip). */
 function isAcceptedFile(name) {
   const lower = name.toLowerCase();
-  return (
-    lower.endsWith(".win") || lower.endsWith(".ogg") || lower.endsWith(".zip")
-  );
+  return lower.endsWith(".win") || lower.endsWith(".ogg") || lower.endsWith(".zip");
 }
 
 /** Sprawdza, czy plik to data.win lub .ogg. */
 function isGameFile(name) {
   const lower = name.toLowerCase();
   return lower === "data.win" || lower.endsWith(".ogg");
+}
+
+function normalizeGameFileName(name) {
+  return name.replace(/\\/g, "/").split("/").pop();
 }
 
 /**
@@ -195,26 +197,30 @@ function isGameFile(name) {
 async function processFiles(files) {
   const accepted = [];
   const zipFiles = [];
+  const seen = new Set();
 
   for (const file of files) {
+    const safeName = normalizeGameFileName(file.name);
     if (file.name.toLowerCase().endsWith(".zip")) {
       zipFiles.push(file);
-    } else if (isGameFile(file.name)) {
+    } else if (isGameFile(safeName) && !seen.has(safeName)) {
+      seen.add(safeName);
       accepted.push(file);
     }
   }
 
-  // Rozpakuj pliki ZIP
   for (const zipFile of zipFiles) {
     try {
       const zip = await JSZip.loadAsync(zipFile);
       zip.forEach((relativePath, zipEntry) => {
-        if (!zipEntry.dir && isGameFile(zipEntry.name)) {
-          accepted.push({ name: zipEntry.name, _zipEntry: zipEntry });
+        const safeName = normalizeGameFileName(zipEntry.name);
+        if (!zipEntry.dir && isGameFile(safeName) && !seen.has(safeName)) {
+          seen.add(safeName);
+          accepted.push({ name: safeName, _zipEntry: zipEntry });
         }
       });
     } catch (err) {
-      screenLog("[ERR] Błąd rozpakowywania ZIP:", err.message);
+      screenLog("[ERR] Błąd rozpakowywania ZIP:", err && err.message ? err.message : err);
     }
   }
 
@@ -223,20 +229,17 @@ async function processFiles(files) {
     return;
   }
 
-  // Zapisz do IndexedDB
   for (const file of accepted) {
     try {
-      let data;
       if (file._zipEntry) {
-        data = await file._zipEntry.async("blob");
-        const blob = new Blob([data]);
+        const blob = new Blob([await file._zipEntry.async("blob")]);
         await saveFileToDB(file.name, blob);
       } else {
         await saveFileToDB(file.name, file);
       }
       screenLog(`[OK] Zapisano: ${file.name}`);
     } catch (err) {
-      screenLog(`[ERR] Nie udało się zapisać ${file.name}:`, err.message);
+      screenLog(`[ERR] Nie udało się zapisać ${file.name}:`, err && err.message ? err.message : err);
     }
   }
 
@@ -247,7 +250,7 @@ async function processFiles(files) {
 async function refreshFileList() {
   const files = await getAllFilesFromDB();
 
-  if (files.length === 0) {
+  if (!Array.isArray(files) || files.length === 0) {
     fileListContainer.classList.add("hidden");
     storageStatus.textContent = "";
     return;
@@ -258,7 +261,7 @@ async function refreshFileList() {
 
   for (const f of files) {
     const li = document.createElement("li");
-    const size = f.data instanceof Blob ? f.data.size : 0;
+    const size = f && f.data instanceof Blob ? f.data.size : 0;
     const sizeStr =
       size > 1024 * 1024
         ? (size / (1024 * 1024)).toFixed(1) + " MB"
@@ -271,12 +274,15 @@ async function refreshFileList() {
     fileListEl.appendChild(li);
   }
 
-  // Status pamięci
   if (navigator.storage && navigator.storage.estimate) {
-    const est = await navigator.storage.estimate();
-    const usedMB = (est.usage / (1024 * 1024)).toFixed(1);
-    const quotaMB = (est.quota / (1024 * 1024)).toFixed(0);
-    storageStatus.textContent = `Pamięć: ${usedMB} MB / ${quotaMB} MB`;
+    try {
+      const est = await navigator.storage.estimate();
+      const usedMB = (est.usage / (1024 * 1024)).toFixed(1);
+      const quotaMB = (est.quota / (1024 * 1024)).toFixed(0);
+      storageStatus.textContent = `Pamięć: ${usedMB} MB / ${quotaMB} MB`;
+    } catch (err) {
+      storageStatus.textContent = "Pamięć: nieznana";
+    }
   }
 }
 
@@ -298,18 +304,18 @@ async function refreshFileList() {
 });
 
 dropZone.addEventListener("drop", (e) => {
-  const files = e.dataTransfer.files;
-  if (files.length) processFiles(files);
+  const files = e.dataTransfer && e.dataTransfer.files;
+  if (files && files.length) processFiles(files);
 });
 
 /* --- Input file --- */
 fileInput.addEventListener("change", () => {
-  if (fileInput.files.length) processFiles(fileInput.files);
+  if (fileInput.files && fileInput.files.length) processFiles(fileInput.files);
   fileInput.value = "";
 });
 
 folderInput.addEventListener("change", () => {
-  if (folderInput.files.length) processFiles(folderInput.files);
+  if (folderInput.files && folderInput.files.length) processFiles(folderInput.files);
   folderInput.value = "";
 });
 
@@ -324,13 +330,14 @@ document.getElementById("reset-btn").addEventListener("click", async () => {
    4. OPFS + WASM – uruchomienie gry
    ============================================================ */
 
-/**
- * Kopiuje pliki z IndexedDB do OPFS.
- * @returns {Promise<string>} Ścieżka do katalogu głównego OPFS.
- */
 async function copyFilesToOPFS() {
   const files = await getAllFilesFromDB();
-  if (files.length === 0) throw new Error("Brak plików w IndexedDB.");
+  if (!Array.isArray(files) || files.length === 0) throw new Error("Brak plików w IndexedDB.");
+
+  if (!navigator.storage || !navigator.storage.getDirectory) {
+    screenLog("[WRN] OPFS niedostępne – pomijam montowanie.");
+    return "/game";
+  }
 
   const root = await navigator.storage.getDirectory();
   const gameDir = await root.getDirectoryHandle("game", { create: true });
@@ -347,9 +354,15 @@ async function copyFilesToOPFS() {
   return "/game";
 }
 
-/**
- * Ładuje moduł WASM i uruchamia runner.
- */
+function getWebglSupportCheck() {
+  const probe = document.createElement("canvas");
+  const webgl2 = probe.getContext("webgl2");
+  if (webgl2) return { ok: true, api: "webgl2", context: webgl2 };
+  const webgl1 = probe.getContext("webgl");
+  if (webgl1) return { ok: true, api: "webgl", context: webgl1 };
+  return { ok: false, api: null, context: null };
+}
+
 async function startGame() {
   if (gameRunning) return;
   gameRunning = true;
@@ -357,86 +370,72 @@ async function startGame() {
   try {
     screenLog("[WASM] Rozpoczynam ładowanie...");
 
-    // 1. Przełącz ekran
     document.getElementById("upload-screen").classList.remove("active");
     document.getElementById("game-screen").classList.add("active");
 
-    // 2. Pobierz canvas i upewnij się, że ma poprawne wymiary
     canvas = document.getElementById("game-canvas");
-    if (!canvas) {
-      throw new Error("Canvas element nie znaleziony!");
-    }
+    if (!canvas) throw new Error("Canvas element nie znaleziony!");
 
-    // Resetuj canvas (usuń stary kontekst WebGL jeśli istnieje)
-    const oldContext = canvas.getContext("webgl");
-    if (oldContext) {
-      const loseContextExt = oldContext.getExtension("WEBGL_lose_context");
-      if (loseContextExt) {
-        loseContextExt.loseContext();
-      }
-    }
-
-    // Ustaw wymiary canvas - BARDZO WAŻNE dla WebGL
     canvas.width = 640;
     canvas.height = 480;
     screenLog(`[CANVAS] Wymiary canvas: ${canvas.width}x${canvas.height}`);
 
-    // 3. Kopiuj pliki do OPFS
+    const support = getWebglSupportCheck();
+    if (!support.ok) {
+      throw new Error("WebGL nie jest dostępny w tej przeglądarce");
+    }
+    screenLog(`[OK] WebGL test: ${support.api}`);
+
     const opfsDir = await copyFilesToOPFS();
 
-    // 4. Import modułu WASM
     screenLog("[WASM] Importowanie modułu...");
     let wasmModule;
     try {
       wasmModule = await import(/* @vite-ignore */ CONFIG.WASM_URL);
     } catch (importErr) {
-      screenLog("[ERR] Nie udało się załadować modułu WASM:", importErr.message);
+      screenLog("[ERR] Nie udało się załadować modułu WASM:", importErr && importErr.message ? importErr.message : importErr);
       throw new Error("Nie można załadować butterscotch.mjs");
     }
 
-    // 5. Inicjalizacja WebGL i modułu WASM jednocześnie
     screenLog("[WASM] Inicjalizacja modułu Emscripten z canvas...");
 
-    // WAŻNE: Przekaż canvas bezpośrednio do wasmModule.default
-    // Emscripten będzie tworzyć własny WebGL context na tym canvasie
-    engineModule = await wasmModule.default({
-      canvas: canvas,
-      // Nie przekazuj własnego kontekstu WebGL - pozwól Emscriptenowi go stworzyć
+    const runnerOptions = {
+      canvas,
       print: (text) => screenLog("[GAME]", text),
       printErr: (text) => screenLog("[GAME-ERR]", text),
-      onRuntimeInitialized: () => {
-        screenLog("[OK] Runtime Emscripten zainicjalizowany");
-      },
-    });
+      onRuntimeInitialized: () => screenLog("[OK] Runtime Emscripten zainicjalizowany"),
+    };
+
+    engineModule = await wasmModule.default(runnerOptions);
 
     if (!engineModule) {
       throw new Error("Nie udało się zainicjalizować modułu WASM");
     }
     screenLog("[OK] Moduł WASM załadowany");
 
-    // 6. Montowanie OPFS
     if (typeof engineModule._mountOpfs === "function") {
       screenLog("[WASM] Montowanie OPFS na " + opfsDir);
       try {
-        engineModule._mountOpfs(opfsDir);
-        screenLog("[OK] OPFS zamontowany");
+        const mountResult = engineModule._mountOpfs(opfsDir);
+        if (mountResult !== undefined) {
+          screenLog("[OK] OPFS zamontowany");
+        }
       } catch (mountErr) {
-        screenLog("[WRN] Błąd montowania OPFS:", mountErr.message);
+        screenLog("[WRN] Błąd montowania OPFS:", mountErr && mountErr.message ? mountErr.message : mountErr);
       }
     } else {
-      screenLog("[WRN] _mountOpfs niedostępne");
+      screenLog("[WRN] _mountOpfs niedostępne; opuszczam montowanie OPFS.");
     }
 
-    // 7. Uruchomienie runnera z parametrami ścieżek
     if (typeof engineModule._startRunner === "function") {
       screenLog("[WASM] Uruchamianie runnera gry...");
       try {
-        // Spróbuj передать ścieżki jako parametry
-        engineModule._startRunner();
-        screenLog("[OK] Gra uruchomiona!");
+        const runnerResult = engineModule._startRunner(opfsDir, opfsDir);
+        screenLog("[OK] Gra uruchomiona!", runnerResult);
       } catch (runErr) {
-        screenLog("[ERR] Błąd uruchamiania runnera:", runErr.message);
-        screenLog("[ERR] Stack: " + runErr.stack);
+        const msg = runErr && runErr.message ? runErr.message : String(runErr);
+        screenLog("[ERR] Błąd uruchamiania runnera:", msg);
+        if (runErr && runErr.stack) screenLog("[ERR] Stack: " + runErr.stack);
         throw runErr;
       }
     } else {
@@ -444,11 +443,10 @@ async function startGame() {
       throw new Error("Brak funkcji _startRunner w module WASM");
     }
   } catch (err) {
-    screenLog("[ERR] Błąd uruchamiania gry:", err.message);
-    if (err.stack) screenLog("[ERR] Stack: " + err.stack);
+    const msg = err && err.message ? err.message : String(err);
+    screenLog("[ERR] Błąd uruchamiania gry:", msg);
+    if (err && err.stack) screenLog("[ERR] Stack: " + err.stack);
     gameRunning = false;
-
-    // Powrót do ekranu uploadu
     document.getElementById("upload-screen").classList.add("active");
     document.getElementById("game-screen").classList.remove("active");
   }
@@ -466,6 +464,7 @@ document.getElementById("start-btn").addEventListener("click", startGame);
  * @param {string} type – 'keydown' lub 'keyup'
  */
 function dispatchKeyEvent(key, type = "keydown") {
+  if (!key) return;
   const event = new KeyboardEvent(type, {
     key,
     code: key.length === 1 ? `Key${key.toUpperCase()}` : key,
@@ -478,7 +477,6 @@ function dispatchKeyEvent(key, type = "keydown") {
 
 /** Inicjalizuje sterowanie dotykowe. */
 function initTouchControls() {
-  // Sprawdź, czy urządzenie ma ekran dotykowy
   const hasTouch = "ontouchstart" in window || navigator.maxTouchPoints > 0;
   const touchControls = document.getElementById("touch-controls");
 
@@ -487,7 +485,6 @@ function initTouchControls() {
     screenLog("[TOUCH] Sterowanie dotykowe aktywne.");
   }
 
-  // D-Pad
   document.querySelectorAll(".dpad-btn").forEach((btn) => {
     const key = btn.dataset.key;
 
@@ -510,7 +507,6 @@ function initTouchControls() {
     btn.addEventListener("mouseleave", onEnd);
   });
 
-  // Przyciski akcji
   document.querySelectorAll(".action-btn").forEach((btn) => {
     const key = btn.dataset.key;
 
@@ -539,7 +535,6 @@ function initTouchControls() {
    ============================================================ */
 
 document.addEventListener("keydown", (e) => {
-  // F11 / F dla fullscreen
   if (e.key === "f" || e.key === "F" || e.key === "F11") {
     if (!document.fullscreenElement) {
       document.documentElement.requestFullscreen().catch(() => {});
@@ -558,36 +553,28 @@ async function init() {
   screenLog("[INIT] Undertale Web Player gotowy.");
   screenLog(`[INIT] IndexedDB: ${CONFIG.DB_NAME}`);
 
-  // Wczytaj istniejące pliki
   await refreshFileList();
-
-  // Inicjalizuj sterowanie dotykowe
   initTouchControls();
 
-  // Sprawdź dostępność OPFS
   if (navigator.storage && navigator.storage.getDirectory) {
     screenLog("[OK] OPFS dostępne.");
   } else {
     screenLog("[WRN] OPFS niedostępne w tej przeglądarce.");
   }
 
-  // Sprawdź dostępność Canvas
-  const testCanvas = document.createElement("canvas");
-  const testGL = testCanvas.getContext("webgl");
-  if (testGL) {
-    screenLog("[OK] WebGL 1.0 dostępne.");
+  const support = getWebglSupportCheck();
+  if (support.ok) {
+    screenLog(`[OK] WebGL 1.0 dostępne (${support.api}).`);
   } else {
     screenLog("[ERR] WebGL 1.0 niedostępne!");
   }
 
-  // Sprawdź WebAssembly
   if (typeof WebAssembly === "object") {
     screenLog("[OK] WebAssembly wspierane.");
   } else {
     screenLog("[ERR] WebAssembly NIE jest wspierane!");
   }
 
-  // Sprawdź Cross-Origin Isolation
   if (window.crossOriginIsolated) {
     screenLog("[OK] Cross-Origin Isolation aktywne (COOP/COEP).");
   } else {

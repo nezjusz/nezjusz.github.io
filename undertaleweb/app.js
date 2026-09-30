@@ -315,23 +315,6 @@ async function copyFilesToOPFS() {
   return "/game";
 }
 
-function createWebGLContext() {
-  if (!canvas) return null;
-
-  const options = {
-    alpha: false,
-    antialias: false,
-    depth: true,
-    stencil: true,
-    powerPreference: "high-performance",
-    premultipliedAlpha: false,
-    preserveDrawingBuffer: false,
-  };
-
-  const gl = canvas.getContext("webgl2", options) || canvas.getContext("webgl", options);
-  return gl;
-}
-
 async function startGame() {
   if (gameRunning) return;
   gameRunning = true;
@@ -349,12 +332,6 @@ async function startGame() {
     canvas.height = 480;
     screenLog(`[CANVAS] Wymiary canvas: ${canvas.width}x${canvas.height}`);
 
-    const webglContext = createWebGLContext();
-    if (!webglContext) {
-      throw new Error("WebGL nie jest dostępny w tej przeglądarce");
-    }
-    screenLog("[OK] Kontekst WebGL został utworzony.");
-
     const opfsDir = await copyFilesToOPFS();
 
     screenLog("[WASM] Importowanie modułu...");
@@ -368,10 +345,10 @@ async function startGame() {
 
     screenLog("[WASM] Inicjalizacja modułu...");
 
-    // Compatibility: some Emscripten builds accept `webglContext`, some accept only `canvas`.
+    // CRITICAL: Pass ONLY canvas without creating a WebGL context first
+    // The WASM runtime MUST be the sole owner of the WebGL context
     const baseOptions = {
       canvas,
-      webglContext,
       print: (text) => screenLog("[GAME]", text),
       printErr: (text) => screenLog("[GAME-ERR]", text),
     };
@@ -397,16 +374,9 @@ async function startGame() {
     if (typeof engineModule._startRunner === "function") {
       screenLog("[WASM] Uruchamianie runnera gry...");
       try {
-        const runnerArgs = [opfsDir, opfsDir];
-        try {
-          engineModule._startRunner(...runnerArgs);
-        } catch (firstErr) {
-          try {
-            engineModule._startRunner({ gamePath: opfsDir, savesPath: opfsDir });
-          } catch (secondErr) {
-            throw firstErr;
-          }
-        }
+        // The runner must receive real game and save paths
+        // Try with proper arguments first
+        engineModule._startRunner(opfsDir, opfsDir);
         screenLog("[OK] Gra uruchomiona!");
       } catch (runErr) {
         const msg = runErr && runErr.message ? runErr.message : String(runErr);

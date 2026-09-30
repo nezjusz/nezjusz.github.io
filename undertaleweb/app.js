@@ -379,6 +379,35 @@ async function initializeCanvas() {
   screenLog("[CANVAS] Canvas wyczyszczony i gotowy do renderingu");
 }
 
+async function loadAndValidateWASM() {
+  screenLog("[WASM] Sprawdzanie modułu Butterscotch...");
+  
+  try {
+    const response = await fetch(CONFIG.WASM_URL);
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+    
+    const text = await response.text();
+    screenLog(`[WASM] Rozmiar pliku: ${text.length} znaków`);
+    
+    // Check if file is valid
+    if (text.length < 100) {
+      throw new Error("Plik butterscotch.mjs jest zbyt mały - wygląda na uszkodzony!");
+    }
+    
+    if (!text.includes("export") && !text.includes("Module")) {
+      throw new Error("Plik nie zawiera prawidłowego modułu JavaScript/WASM!");
+    }
+    
+    screenLog("[WASM] ✓ Plik modułu wygląda prawidłowo");
+    
+  } catch (err) {
+    throw new Error(`Błąd ładowania butterscotch.mjs: ${err.message}`);
+  }
+}
+
 async function startGame() {
   if (gameRunning) {
     screenLog("[WRN] Gra już jest uruchomiona!");
@@ -398,73 +427,90 @@ async function startGame() {
     screenLog("[CANVAS] Inicjalizacja canvas...");
     await initializeCanvas();
 
+    // Validate WASM module exists and is valid
+    screenLog("[WASM] Walidacja modułu...");
+    await loadAndValidateWASM();
+
     // Prepare OPFS
     screenLog("[OPFS] Przygotowywanie systemu plików...");
     const { gameDir, savesDir } = await copyFilesToOPFS();
     screenLog(`[OPFS] Ścieżki: gameDir=${gameDir}, savesDir=${savesDir}`);
 
     // Import WASM module
-    screenLog("[WASM] Importowanie modułu Butterscotch...");
+    screenLog("[WASM] Importowanie modułu...");
     let wasmModule;
     try {
       wasmModule = await import(/* @vite-ignore */ CONFIG.WASM_URL);
-      screenLog("[WASM] Moduł zaimportowany");
+      screenLog("[WASM] Moduł zaimportowany pomyślnie");
     } catch (importErr) {
       const errMsg = importErr && importErr.message ? importErr.message : String(importErr);
       screenLog("[ERR] Import modułu WASM nie powiódł się:", errMsg);
+      screenLog("[ERR] Czy plik butterscotch.mjs istnieje i zawiera prawidłowy moduł?");
       throw new Error(`Nie można załadować ${CONFIG.WASM_URL}: ${errMsg}`);
     }
 
     // Check if default export exists
-    if (!wasmModule.default) {
+    if (!wasmModule || !wasmModule.default) {
+      screenLog("[ERR] Moduł nie ma default export");
+      screenLog("[ERR] Zawartość modułu:", Object.keys(wasmModule || {}));
       throw new Error("Moduł WASM nie ma default export!");
     }
 
-    screenLog("[WASM] Inicjalizacja modułu...");
+    screenLog("[WASM] Inicjalizacja instancji modułu...");
 
     // Initialize WASM module with proper parameters
-    const moduleInstance = await wasmModule.default({
-      canvas: canvas,
-      gamePath: gameDir,
-      savesPath: savesDir,
-      
-      // Logging functions
-      print: (text) => {
-        console.log("[GAME]", text);
-        screenLog("[GAME]", text);
-      },
-      printErr: (text) => {
-        console.error("[GAME-ERR]", text);
-        screenLog("[GAME-ERR]", text);
-      },
-      
-      // Runtime callbacks
-      onRuntimeInitialized: () => {
-        screenLog("[WASM] ✓ Runtime zainicjalizowany");
-      },
-      
-      onAbort: (msg) => {
-        screenLog("[ERR] ✗ WASM abort:", msg);
-        gameRunning = false;
-        throw new Error(`WASM abort: ${msg}`);
-      },
-      
-      // Additional options
-      locateFile: (fileName) => {
-        return `./${fileName}`;
-      },
-    });
+    let moduleInstance;
+    try {
+      moduleInstance = await wasmModule.default({
+        canvas: canvas,
+        gamePath: gameDir,
+        savesPath: savesDir,
+        
+        // Logging functions
+        print: (text) => {
+          console.log("[GAME]", text);
+          screenLog("[GAME]", text);
+        },
+        printErr: (text) => {
+          console.error("[GAME-ERR]", text);
+          screenLog("[GAME-ERR]", text);
+        },
+        
+        // Runtime callbacks
+        onRuntimeInitialized: () => {
+          screenLog("[WASM] ✓ Runtime zainicjalizowany");
+        },
+        
+        onAbort: (msg) => {
+          screenLog("[ERR] ✗ WASM abort:", msg);
+          gameRunning = false;
+        },
+        
+        // Additional options
+        locateFile: (fileName) => {
+          return `./${fileName}`;
+        },
+      });
+    } catch (initErr) {
+      const errMsg = initErr && initErr.message ? initErr.message : String(initErr);
+      screenLog("[ERR] Błąd inicjalizacji modułu:", errMsg);
+      throw initErr;
+    }
 
     if (!moduleInstance) {
-      throw new Error("WASM moduł zwrócił null!");
+      throw new Error("WASM moduł zwrócił null - inicjalizacja nie powiodła się!");
     }
 
     engineModule = moduleInstance;
     gameContext = moduleInstance;
     
-    screenLog("[WASM] ✓ Moduł WASM załadowany");
+    screenLog("[WASM] ✓ Moduł WASM załadowany i uruchomiony");
     screenLog("[START] ========== GRA POWINNA DZIAŁAĆ ==========");
     screenLog("[INFO] Naciśnij F aby włączyć fullscreen");
+    
+    // Give WASM some time to render
+    await new Promise(resolve => setTimeout(resolve, 500));
+    screenLog("[INFO] Czekanie na pierwszy render...");
 
   } catch (err) {
     const msg = err && err.message ? err.message : String(err);
@@ -477,12 +523,12 @@ async function startGame() {
     
     gameRunning = false;
     
-    // Return to upload screen
+    // Return to upload screen after 3 seconds
     setTimeout(() => {
       document.getElementById("upload-screen").classList.add("active");
       document.getElementById("game-screen").classList.remove("active");
       screenLog("[ERR] Powrót do ekranu upload");
-    }, 2000);
+    }, 3000);
   }
 }
 
@@ -601,11 +647,12 @@ async function init() {
   interceptConsole();
   
   screenLog("╔════════════════════════════════════╗");
-  screenLog("║   UNDERTALE WEB PLAYER v2.0        ║");
+  screenLog("║   UNDERTALE WEB PLAYER v2.1        ║");
+  screenLog("║      BLACK SCREEN DEBUGGING         ║");
   screenLog("╚════════════════════════════════════╝");
   
   screenLog(`[CONFIG] DB: ${CONFIG.DB_NAME}`);
-  screenLog(`[CONFIG] WASM: ${CONFIG.WASM_URL}`);
+  screenLog(`[CONFIG] WASM URL: ${CONFIG.WASM_URL}`);
 
   // Check browser capabilities
   screenLog("[CHECK] Sprawdzanie możliwości przeglądarki...");
@@ -614,7 +661,7 @@ async function init() {
   if (navigator.storage && navigator.storage.getDirectory) {
     screenLog("[OK] ✓ OPFS (Origin Private File System) dostępne");
   } else {
-    screenLog("[WRN] ⚠ OPFS niedostępne - używanie fallbacku");
+    screenLog("[WRN] ⚠ OPFS niedostępne");
   }
 
   // WebGL
@@ -623,7 +670,7 @@ async function init() {
   if (hasWebGL) {
     screenLog("[OK] ✓ WebGL dostępne");
   } else {
-    screenLog("[ERR] ✗ WebGL niedostępne - gra nie będzie działać!");
+    screenLog("[ERR] ✗ WebGL niedostępne!");
   }
 
   // WebAssembly
@@ -635,10 +682,9 @@ async function init() {
 
   // Cross-Origin Isolation
   if (window.crossOriginIsolated) {
-    screenLog("[OK] ✓ Cross-Origin Isolation aktywne (COOP/COEP)");
+    screenLog("[OK] ✓ Cross-Origin Isolation aktywne");
   } else {
     screenLog("[WRN] ⚠ Cross-Origin Isolation nieaktywne");
-    screenLog("[INFO] Ponowne wczytanie strony...");
   }
 
   // SharedArrayBuffer
@@ -648,12 +694,28 @@ async function init() {
     screenLog("[WRN] ⚠ SharedArrayBuffer niedostępne");
   }
 
+  // Check WASM file exists
+  screenLog("[WASM] Sprawdzanie dostępności butterscotch.mjs...");
+  try {
+    const resp = await fetch(CONFIG.WASM_URL, { method: "HEAD" });
+    if (resp.ok) {
+      screenLog(`[OK] ✓ butterscotch.mjs jest dostępny (${resp.headers.get('content-type')})`);
+    } else {
+      screenLog(`[ERR] ✗ butterscotch.mjs zwrócił HTTP ${resp.status}`);
+    }
+  } catch (e) {
+    screenLog(`[ERR] ✗ butterscotch.mjs niedostępny: ${e.message}`);
+  }
+
   screenLog("[INIT] Ładowanie plików z IndexedDB...");
   await refreshFileList();
   
   initTouchControls();
 
-  screenLog("[READY] ✓ UNDERTALE Web Player gotowy do użytku!");
+  screenLog("[READY] ✓ UNDERTALE Web Player gotowy!");
+  screenLog("[INFO] 1. Wgraj plik gry (data.win)");
+  screenLog("[INFO] 2. Kliknij 'URUCHOM GRĘ'");
+  screenLog("[INFO] 3. Obserwuj logi poniżej");
 }
 
 // Wait for DOM to be fully loaded

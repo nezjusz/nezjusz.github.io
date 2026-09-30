@@ -17,7 +17,7 @@ const CONFIG = {
   DB_VERSION: 1,
   STORE_NAME: "gameFiles",
   WASM_URL: "./butterscotch.mjs",
-  // Alternatywnie: localny plik ./butterscotch.mjs
+  // Alternatywnie: lokalny plik ./butterscotch.mjs
 };
 
 /** @type {HTMLCanvasElement} */
@@ -361,65 +361,97 @@ async function startGame() {
     document.getElementById("upload-screen").classList.remove("active");
     document.getElementById("game-screen").classList.add("active");
 
-    // 2. Pobierz canvas
+    // 2. Pobierz canvas i upewnij się, że ma poprawne wymiary
     canvas = document.getElementById("game-canvas");
+    if (!canvas) {
+      throw new Error("Canvas element nie znaleziony!");
+    }
+
+    // Upewnij się, że canvas ma poprawne wymiary (ważne dla WebGL)
+    canvas.width = 640;
+    canvas.height = 480;
+    screenLog(`[CANVAS] Wymiary canvas: ${canvas.width}x${canvas.height}`);
 
     // 3. Kopiuj pliki do OPFS
     const opfsDir = await copyFilesToOPFS();
 
     // 4. Import modułu WASM
     screenLog("[WASM] Importowanie modułu...");
-    const wasmModule = await import(/* @vite-ignore */ CONFIG.WASM_URL);
+    let wasmModule;
+    try {
+      wasmModule = await import(/* @vite-ignore */ CONFIG.WASM_URL);
+    } catch (importErr) {
+      screenLog("[ERR] Nie udało się załadować modułu WASM:", importErr.message);
+      throw new Error("Nie można załadować butterscotch.mjs");
+    }
 
-    // 5. Inicjalizacja modułu
-    screenLog("[WASM] Inicjalizacja...");
-    // Wymuś utworzenie kontekstu WebGL 1.0 na canvasie
+    // 5. Inicjalizacja WebGL
+    screenLog("[WASM] Inicjalizacja WebGL...");
+
+    // Upewnij się, że canvas ma WebGL 1.0 oraz próbujemy utworzyć kontekst poprawnie
     const gl = canvas.getContext("webgl", {
       alpha: false,
       depth: true,
       stencil: true,
       antialias: false,
+      premultipliedAlpha: false,
+      preserveDrawingBuffer: false,
+      powerPreference: "high-performance",
+      failIfMajorPerformanceCaveat: false,
     });
 
     if (!gl) {
-      screenLog("[ERR] Nie udało się utworzyć kontekstu WebGL 1.0!");
-      throw new Error("WebGL 1.0 nie jest dostępny.");
+      screenLog("[ERR] Nie udało się utworzyć kontekstu WebGL!");
+      screenLog("[ERR] Twoja przeglądarka może nie wspierać WebGL lub ma go wyłączone.");
+      throw new Error("WebGL nie jest dostępny w tej przeglądarce");
     }
-    screenLog("[OK] Kontekst WebGL 1.0 utworzony pomyślnie.");
+    screenLog("[OK] Kontekst WebGL 1.0 utworzony pomyślnie");
 
-    // Przekaż istniejący kontekst do modułu WASM
+    // 6. Inicjalizacja modułu WASM (TYLKO RAZ!)
+    screenLog("[WASM] Inicjalizacja modułu Emscripten...");
     engineModule = await wasmModule.default({
       canvas: canvas,
-      webglContext: gl, // <-- Dodaj tę linię
-      print: (text) => screenLog("[GAME]", text),
-      printErr: (text) => screenLog("[GAME-ERR]", text),
-    });
-    engineModule = await wasmModule.default({
-      canvas,
+      webglContext: gl,
       print: (text) => screenLog("[GAME]", text),
       printErr: (text) => screenLog("[GAME-ERR]", text),
     });
 
-    // 6. Montowanie OPFS
+    if (!engineModule) {
+      throw new Error("Nie udało się zainicjalizować modułu WASM");
+    }
+    screenLog("[OK] Moduł WASM załadowany");
+
+    // 7. Montowanie OPFS
     if (typeof engineModule._mountOpfs === "function") {
-      screenLog("[WASM] Montowanie OPFS...");
-      engineModule._mountOpfs(opfsDir);
+      screenLog("[WASM] Montowanie OPFS na " + opfsDir);
+      try {
+        engineModule._mountOpfs(opfsDir);
+        screenLog("[OK] OPFS zamontowany");
+      } catch (mountErr) {
+        screenLog("[WRN] Błąd montowania OPFS:", mountErr.message);
+        screenLog("[WRN] Próbuję użyć domyślnego systemu plików");
+      }
     } else {
       screenLog("[WRN] _mountOpfs niedostępne – używam domyślnego FS.");
     }
 
-    // 7. Uruchomienie runnera
+    // 8. Uruchomienie runnera
     if (typeof engineModule._startRunner === "function") {
-      screenLog("[WASM] Uruchamianie runnera...");
-      engineModule._startRunner();
+      screenLog("[WASM] Uruchamianie runnera gry...");
+      try {
+        engineModule._startRunner();
+        screenLog("[OK] Gra uruchomiona!");
+      } catch (runErr) {
+        screenLog("[ERR] Błąd uruchamiania runnera:", runErr.message);
+        throw runErr;
+      }
     } else {
-      screenLog("[ERR] _startRunner niedostępne!");
-      throw new Error("Brak funkcji _startRunner w module WASM.");
+      screenLog("[ERR] Funkcja _startRunner nie znaleziona w module!");
+      throw new Error("Brak funkcji _startRunner w module WASM");
     }
-
-    screenLog("[OK] Gra uruchomiona!");
   } catch (err) {
-    screenLog("[ERR] Błąd uruchamiania:", err.message);
+    screenLog("[ERR] Błąd uruchamiania gry:", err.message);
+    screenLog("[ERR] Stack: " + err.stack);
     gameRunning = false;
 
     // Powrót do ekranu uploadu
@@ -545,11 +577,27 @@ async function init() {
     screenLog("[WRN] OPFS niedostępne w tej przeglądarce.");
   }
 
+  // Sprawdź dostępność Canvas
+  const testCanvas = document.createElement("canvas");
+  const testGL = testCanvas.getContext("webgl");
+  if (testGL) {
+    screenLog("[OK] WebGL 1.0 dostępne.");
+  } else {
+    screenLog("[ERR] WebGL 1.0 niedostępne!");
+  }
+
   // Sprawdź WebAssembly
   if (typeof WebAssembly === "object") {
     screenLog("[OK] WebAssembly wspierane.");
   } else {
     screenLog("[ERR] WebAssembly NIE jest wspierane!");
+  }
+
+  // Sprawdź Cross-Origin Isolation
+  if (window.crossOriginIsolated) {
+    screenLog("[OK] Cross-Origin Isolation aktywne (COOP/COEP).");
+  } else {
+    screenLog("[WRN] Cross-Origin Isolation nieaktywne - niektóre funkcje mogą nie działać.");
   }
 }
 

@@ -17,7 +17,6 @@ const CONFIG = {
   DB_VERSION: 1,
   STORE_NAME: "gameFiles",
   WASM_URL: "./butterscotch.mjs",
-  // Alternatywnie: lokalny plik ./butterscotch.mjs
 };
 
 /** @type {HTMLCanvasElement} */
@@ -354,15 +353,6 @@ async function copyFilesToOPFS() {
   return "/game";
 }
 
-function getWebglSupportCheck() {
-  const probe = document.createElement("canvas");
-  const webgl2 = probe.getContext("webgl2");
-  if (webgl2) return { ok: true, api: "webgl2", context: webgl2 };
-  const webgl1 = probe.getContext("webgl");
-  if (webgl1) return { ok: true, api: "webgl", context: webgl1 };
-  return { ok: false, api: null, context: null };
-}
-
 async function startGame() {
   if (gameRunning) return;
   gameRunning = true;
@@ -376,15 +366,10 @@ async function startGame() {
     canvas = document.getElementById("game-canvas");
     if (!canvas) throw new Error("Canvas element nie znaleziony!");
 
+    // Set canvas size ONLY - do NOT create WebGL context
     canvas.width = 640;
     canvas.height = 480;
     screenLog(`[CANVAS] Wymiary canvas: ${canvas.width}x${canvas.height}`);
-
-    const support = getWebglSupportCheck();
-    if (!support.ok) {
-      throw new Error("WebGL nie jest dostępny w tej przeglądarce");
-    }
-    screenLog(`[OK] WebGL test: ${support.api}`);
 
     const opfsDir = await copyFilesToOPFS();
 
@@ -397,13 +382,14 @@ async function startGame() {
       throw new Error("Nie można załadować butterscotch.mjs");
     }
 
-    screenLog("[WASM] Inicjalizacja modułu Emscripten z canvas...");
+    screenLog("[WASM] Inicjalizacja modułu Emscripten...");
 
+    // CRITICAL: Pass ONLY canvas, no WebGL context pre-creation
+    // Emscripten MUST create its own context inside _startRunner
     const runnerOptions = {
       canvas,
       print: (text) => screenLog("[GAME]", text),
       printErr: (text) => screenLog("[GAME-ERR]", text),
-      onRuntimeInitialized: () => screenLog("[OK] Runtime Emscripten zainicjalizowany"),
     };
 
     engineModule = await wasmModule.default(runnerOptions);
@@ -413,25 +399,26 @@ async function startGame() {
     }
     screenLog("[OK] Moduł WASM załadowany");
 
+    // Mount OPFS if available
     if (typeof engineModule._mountOpfs === "function") {
       screenLog("[WASM] Montowanie OPFS na " + opfsDir);
       try {
-        const mountResult = engineModule._mountOpfs(opfsDir);
-        if (mountResult !== undefined) {
-          screenLog("[OK] OPFS zamontowany");
-        }
+        engineModule._mountOpfs(opfsDir);
+        screenLog("[OK] OPFS zamontowany");
       } catch (mountErr) {
         screenLog("[WRN] Błąd montowania OPFS:", mountErr && mountErr.message ? mountErr.message : mountErr);
       }
     } else {
-      screenLog("[WRN] _mountOpfs niedostępne; opuszczam montowanie OPFS.");
+      screenLog("[WRN] _mountOpfs niedostępne");
     }
 
+    // Start runner with game and save paths
     if (typeof engineModule._startRunner === "function") {
       screenLog("[WASM] Uruchamianie runnera gry...");
       try {
-        const runnerResult = engineModule._startRunner(opfsDir, opfsDir);
-        screenLog("[OK] Gra uruchomiona!", runnerResult);
+        // Pass resolved paths to the runner
+        engineModule._startRunner(opfsDir, opfsDir);
+        screenLog("[OK] Gra uruchomiona!");
       } catch (runErr) {
         const msg = runErr && runErr.message ? runErr.message : String(runErr);
         screenLog("[ERR] Błąd uruchamiania runnera:", msg);
@@ -562,11 +549,12 @@ async function init() {
     screenLog("[WRN] OPFS niedostępne w tej przeglądarce.");
   }
 
-  const support = getWebglSupportCheck();
-  if (support.ok) {
-    screenLog(`[OK] WebGL 1.0 dostępne (${support.api}).`);
+  // Check WebGL support passively (don't create context on main canvas)
+  const testCanvas = document.createElement("canvas");
+  if (testCanvas.getContext("webgl") || testCanvas.getContext("webgl2")) {
+    screenLog("[OK] WebGL dostępne.");
   } else {
-    screenLog("[ERR] WebGL 1.0 niedostępne!");
+    screenLog("[ERR] WebGL niedostępne!");
   }
 
   if (typeof WebAssembly === "object") {

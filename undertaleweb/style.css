@@ -1,196 +1,15 @@
-/* ===== Reset & zmienne ===== */
-*,
-*::before,
-*::after {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-}
-
-:root {
-  --bg: #000000;
-  --fg: #ffffff;
-  --accent: #ffff00;
-  --danger: #ff4444;
-  --border: #ffffff;
-  --font-retro: "Press Start 2P", system-ui, monospace;
-  --pixel: 4px;
-}
-
-html, body {
-  width: 100%;
-  height: 100%;
-  background: var(--bg);
-  color: var(--fg);
-  font-family: var(--font-retro);
-  overflow: hidden;
-  -webkit-tap-highlight-color: transparent;
-  user-select: none;
-}
-
-/* ===== Layout ===== */
-#app {
-  position: relative;
-  width: 100vw;
-  height: 100vh;
-  overflow: hidden;
-}
-
-.screen {
-  position: absolute;
-  inset: 0;
-  display: none;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 16px;
-  overflow-y: auto;
-}
-.screen.active {
-  display: flex;
-}
-
-.hidden { display: none !important; }
-
-/* ===== Typografia retro ===== */
-.retro-title {
-  font-size: clamp(1.5rem, 6vw, 3rem);
-  letter-spacing: 2px;
-  text-align: center;
-  text-shadow: 4px 4px 0 #888;
-  margin-bottom: 8px;
-}
-
-.retro-subtitle {
-  font-size: clamp(0.6rem, 2.5vw, 1rem);
-  letter-spacing: 4px;
-  text-align: center;
-  opacity: 0.7;
-  margin-bottom: 32px;
-}
-
-.retro-label {
-  font-size: 0.6rem;
-  letter-spacing: 2px;
-  opacity: 0.8;
-}
-
-/* ===== Przyciski retro ===== */
-.retro-btn {
-  display: inline-block;
-  padding: 12px 20px;
-  font-family: var(--font-retro);
-  font-size: 0.7rem;
-  letter-spacing: 1px;
-  color: var(--fg);
-  background: transparent;
-  border: var(--pixel) solid var(--border);
-  cursor: pointer;
-  transition: background 0.1s, color 0.1s;
-  text-transform: uppercase;
-}
-.retro-btn:hover,
-.retro-btn:focus-visible {
-  background: var(--fg);
-  color: var(--bg);
-  outline: none;
-}
-.retro-btn:active {
-  transform: translate(2px, 2px);
-}
-.retro-btn.danger {
-  border-color: var(--danger);
-  color: var(--danger);
-}
-.retro-btn.danger:hover {
-  background: var(--danger);
-  color: var(--bg);
-}
-.retro-btn.secondary {
-  margin-top: 8px;
-  border-color: #888;
-  color: #888;
-}
-.retro-btn.secondary:hover {
-  background: #888;
-  color: var(--bg);
-}
-
-/* ===== Drop zone ===== */
-.drop-zone {
-  width: min(90vw, 480px);
-  padding: 32px 16px;
-  border: var(--pixel) dashed var(--border);
-  text-align: center;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  transition: border-color 0.2s, background 0.2s;
-}
-.drop-zone.dragover {
-  border-color: var(--accent);
-  background: rgba(255, 255, 0, 0.05);
-}
-.drop-text {
-  font-size: 0.65rem;
-  line-height: 1.6;
-}
-.drop-text strong { color: var(--accent); }
-.drop-hint {
-  font-size: 0.55rem;
-  opacity: 0.5;
-  margin: 4px 0;
-}
-
-/* ===== Lista plików ===== */
-.file-list-container {
-  width: min(90vw, 480px);
-  margin-top: 16px;
-}
-.file-list {
-  list-style: none;
-  max-height: 160px;
-  overflow-y: auto;
-  border: 2px solid #333;
-  padding: 8px;
-  margin: 8px 0 16px;
-  font-size: 0.55rem;
-  line-height: 1.8;
-}
-.file-list li {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-}
-.file-list .file-size {
-  opacity: 0.5;
-  flex-shrink: 0;
-}
-.action-row {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-/* ===== Status pamięci ===== */
-.storage-status {
-  margin-top: 16px;
-  font-size: 0.5rem;
-  opacity: 0.6;
-  text-align: center;
-  line-height: 1.8;
-}
-
 /* ===== Ekran gry ===== */
 .canvas-wrapper {
-  position: relative;
-  width: min(100vw, 100vh * 4 / 3);
-  height: min(100vh, 100vw * 3 / 4);
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
   background: #000;
+  z-index: 1;
 }
 
 #game-canvas {
@@ -204,8 +23,11 @@ html, body {
 
 /* ===== Sterowanie dotykowe ===== */
 .touch-controls {
-  position: absolute;
-  inset: 0;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
   pointer-events: none;
   z-index: 10;
 }
@@ -255,29 +77,31 @@ html, body {
 
 /* ===== Panel logów ===== */
 .log-panel {
-  position: absolute;
+  position: fixed;
   top: 8px;
   right: 8px;
   width: min(90vw, 360px);
   max-height: 30vh;
-  background: rgba(0, 0, 0, 0.85);
-  border: 1px solid #333;
+  background: rgba(0, 0, 0, 0.95);
+  border: 2px solid #0f0;
   display: flex;
   flex-direction: column;
-  z-index: 20;
+  z-index: 100;
   font-size: 0.5rem;
+  box-shadow: 0 0 20px rgba(0, 255, 0, 0.3);
 }
 .log-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding: 4px 8px;
-  border-bottom: 1px solid #333;
+  border-bottom: 2px solid #0f0;
+  background: rgba(0, 50, 0, 0.8);
 }
 .log-clear {
   background: none;
   border: none;
-  color: var(--fg);
+  color: #0f0;
   font-family: var(--font-retro);
   font-size: 0.6rem;
   cursor: pointer;
@@ -289,20 +113,8 @@ html, body {
   margin: 0;
   white-space: pre-wrap;
   word-break: break-all;
-  line-height: 1.6;
-  font-size: 0.5rem;
+  line-height: 1.4;
+  font-size: 0.45rem;
   color: #0f0;
-}
-
-/* ===== Responsywność ===== */
-@media (max-width: 480px) {
-  .dpad-btn, .action-btn {
-    width: 42px;
-    height: 42px;
-    font-size: 0.6rem;
-  }
-  .touch-controls .dpad {
-    grid-template-columns: repeat(3, 42px);
-    grid-template-rows: repeat(3, 42px);
-  }
+  font-family: "Courier New", monospace;
 }

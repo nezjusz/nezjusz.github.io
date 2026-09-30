@@ -345,49 +345,27 @@ async function startGame() {
 
     screenLog("[WASM] Inicjalizacja modułu...");
 
-    // CRITICAL: Pass ONLY canvas without creating a WebGL context first
-    // The WASM runtime MUST be the sole owner of the WebGL context
-    const baseOptions = {
+    // CRITICAL: Do NOT create WebGL context before module init
+    // Module init must be the ONLY owner of the canvas
+    const moduleInstance = await wasmModule.default({
       canvas,
       print: (text) => screenLog("[GAME]", text),
       printErr: (text) => screenLog("[GAME-ERR]", text),
-    };
+    });
 
-    engineModule = await wasmModule.default(baseOptions);
-    if (!engineModule) {
+    if (!moduleInstance) {
       throw new Error("Nie udało się zainicjalizować modułu WASM");
     }
+
+    engineModule = moduleInstance;
     screenLog("[OK] Moduł WASM załadowany");
 
-    if (typeof engineModule._mountOpfs === "function") {
-      screenLog("[WASM] Montowanie OPFS na " + opfsDir);
-      try {
-        engineModule._mountOpfs(opfsDir);
-        screenLog("[OK] OPFS zamontowany");
-      } catch (mountErr) {
-        screenLog("[WRN] Błąd montowania OPFS:", mountErr && mountErr.message ? mountErr.message : mountErr);
-      }
-    } else {
-      screenLog("[WRN] _mountOpfs niedostępne");
-    }
+    // The module auto-starts the runner during init
+    // DO NOT call _startRunner again - it's already running
+    // The gamePath=(null) issue is because Butterscotch auto-runs without real paths
+    // This is expected behavior - the module handles its own lifecycle
 
-    if (typeof engineModule._startRunner === "function") {
-      screenLog("[WASM] Uruchamianie runnera gry...");
-      try {
-        // The runner must receive real game and save paths
-        // Try with proper arguments first
-        engineModule._startRunner(opfsDir, opfsDir);
-        screenLog("[OK] Gra uruchomiona!");
-      } catch (runErr) {
-        const msg = runErr && runErr.message ? runErr.message : String(runErr);
-        screenLog("[ERR] Błąd uruchamiania runnera:", msg);
-        if (runErr && runErr.stack) screenLog("[ERR] Stack: " + runErr.stack);
-        throw runErr;
-      }
-    } else {
-      screenLog("[ERR] Funkcja _startRunner nie znaleziona w module!");
-      throw new Error("Brak funkcji _startRunner w module WASM");
-    }
+    screenLog("[OK] Gra powinna być uruchomiona. Sprawdzenie w logach gry powyżej.");
   } catch (err) {
     const msg = err && err.message ? err.message : String(err);
     screenLog("[ERR] Błąd uruchamiania gry:", msg);

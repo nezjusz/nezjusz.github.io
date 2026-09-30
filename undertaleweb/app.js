@@ -32,10 +32,6 @@ const logOutput = document.getElementById("log-output");
 const MAX_LOG_LINES = 200;
 const logLines = [];
 
-/**
- * Dodaje wpis do ekranowego logu.
- * @param {...any} args
- */
 function screenLog(...args) {
   if (!logOutput) return;
   const text = args
@@ -52,7 +48,6 @@ function screenLog(...args) {
   logOutput.scrollTop = logOutput.scrollHeight;
 }
 
-/** Podmienia console.log / console.error na wersję logującą do panelu. */
 function interceptConsole() {
   const originalLog = console.log.bind(console);
   const originalError = console.error.bind(console);
@@ -81,10 +76,6 @@ document.getElementById("clear-log").addEventListener("click", () => {
    2. INDEXEDDB – warstwa przechowywania
    ============================================================ */
 
-/**
- * Otwiera (lub tworzy) bazę IndexedDB.
- * @returns {Promise<IDBDatabase>}
- */
 function openDB() {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(CONFIG.DB_NAME, CONFIG.DB_VERSION);
@@ -101,12 +92,6 @@ function openDB() {
   });
 }
 
-/**
- * Zapisuje plik w IndexedDB.
- * @param {string} name
- * @param {Blob|ArrayBuffer} data
- * @returns {Promise<void>}
- */
 async function saveFileToDB(name, data) {
   const db = await openDB();
   return new Promise((resolve, reject) => {
@@ -118,10 +103,6 @@ async function saveFileToDB(name, data) {
   });
 }
 
-/**
- * Pobiera wszystkie pliki z IndexedDB.
- * @returns {Promise<Array<{name: string, data: Blob}>>}
- */
 async function getAllFilesFromDB() {
   const db = await openDB();
   return new Promise((resolve, reject) => {
@@ -133,10 +114,6 @@ async function getAllFilesFromDB() {
   });
 }
 
-/**
- * Usuwa wszystkie pliki z IndexedDB.
- * @returns {Promise<void>}
- */
 async function clearDB() {
   const db = await openDB();
   return new Promise((resolve, reject) => {
@@ -147,11 +124,6 @@ async function clearDB() {
   });
 }
 
-/**
- * Usuwa pojedynczy plik z IndexedDB.
- * @param {string} name
- * @returns {Promise<void>}
- */
 async function deleteFileFromDB(name) {
   const db = await openDB();
   return new Promise((resolve, reject) => {
@@ -173,26 +145,20 @@ const fileListEl = document.getElementById("file-list");
 const fileListContainer = document.getElementById("file-list-container");
 const storageStatus = document.getElementById("storage-status");
 
-/** Sprawdza, czy plik jest akceptowalny (data.win / .ogg / .zip). */
 function isAcceptedFile(name) {
   const lower = name.toLowerCase();
   return lower.endsWith(".win") || lower.endsWith(".ogg") || lower.endsWith(".zip");
 }
 
-/** Sprawdza, czy plik to data.win lub .ogg. */
 function isGameFile(name) {
   const lower = name.toLowerCase();
   return lower === "data.win" || lower.endsWith(".ogg");
 }
 
 function normalizeGameFileName(name) {
-  return name.replace(/\\/g, "/").split("/").pop();
+  return (name || "").replace(/\\/g, "/").split("/").pop();
 }
 
-/**
- * Przetwarza listę File obiektów (z input lub drag&drop).
- * @param {FileList|File[]} files
- */
 async function processFiles(files) {
   const accepted = [];
   const zipFiles = [];
@@ -245,7 +211,6 @@ async function processFiles(files) {
   await refreshFileList();
 }
 
-/** Odświeża listę plików z IndexedDB. */
 async function refreshFileList() {
   const files = await getAllFilesFromDB();
 
@@ -285,7 +250,6 @@ async function refreshFileList() {
   }
 }
 
-/* --- Drag & Drop --- */
 ["dragenter", "dragover"].forEach((evt) => {
   dropZone.addEventListener(evt, (e) => {
     e.preventDefault();
@@ -307,7 +271,6 @@ dropZone.addEventListener("drop", (e) => {
   if (files && files.length) processFiles(files);
 });
 
-/* --- Input file --- */
 fileInput.addEventListener("change", () => {
   if (fileInput.files && fileInput.files.length) processFiles(fileInput.files);
   fileInput.value = "";
@@ -318,7 +281,6 @@ folderInput.addEventListener("change", () => {
   folderInput.value = "";
 });
 
-/* --- Reset --- */
 document.getElementById("reset-btn").addEventListener("click", async () => {
   await clearDB();
   screenLog("[OK] Wyczyszczono IndexedDB.");
@@ -353,6 +315,23 @@ async function copyFilesToOPFS() {
   return "/game";
 }
 
+function createWebGLContext() {
+  if (!canvas) return null;
+
+  const options = {
+    alpha: false,
+    antialias: false,
+    depth: true,
+    stencil: true,
+    powerPreference: "high-performance",
+    premultipliedAlpha: false,
+    preserveDrawingBuffer: false,
+  };
+
+  const gl = canvas.getContext("webgl2", options) || canvas.getContext("webgl", options);
+  return gl;
+}
+
 async function startGame() {
   if (gameRunning) return;
   gameRunning = true;
@@ -366,10 +345,15 @@ async function startGame() {
     canvas = document.getElementById("game-canvas");
     if (!canvas) throw new Error("Canvas element nie znaleziony!");
 
-    // Set canvas size ONLY - do NOT create WebGL context
     canvas.width = 640;
     canvas.height = 480;
     screenLog(`[CANVAS] Wymiary canvas: ${canvas.width}x${canvas.height}`);
+
+    const webglContext = createWebGLContext();
+    if (!webglContext) {
+      throw new Error("WebGL nie jest dostępny w tej przeglądarce");
+    }
+    screenLog("[OK] Kontekst WebGL został utworzony.");
 
     const opfsDir = await copyFilesToOPFS();
 
@@ -382,24 +366,22 @@ async function startGame() {
       throw new Error("Nie można załadować butterscotch.mjs");
     }
 
-    screenLog("[WASM] Inicjalizacja modułu Emscripten...");
+    screenLog("[WASM] Inicjalizacja modułu...");
 
-    // CRITICAL: Pass ONLY canvas, no WebGL context pre-creation
-    // Emscripten MUST create its own context inside _startRunner
-    const runnerOptions = {
+    // Compatibility: some Emscripten builds accept `webglContext`, some accept only `canvas`.
+    const baseOptions = {
       canvas,
+      webglContext,
       print: (text) => screenLog("[GAME]", text),
       printErr: (text) => screenLog("[GAME-ERR]", text),
     };
 
-    engineModule = await wasmModule.default(runnerOptions);
-
+    engineModule = await wasmModule.default(baseOptions);
     if (!engineModule) {
       throw new Error("Nie udało się zainicjalizować modułu WASM");
     }
     screenLog("[OK] Moduł WASM załadowany");
 
-    // Mount OPFS if available
     if (typeof engineModule._mountOpfs === "function") {
       screenLog("[WASM] Montowanie OPFS na " + opfsDir);
       try {
@@ -412,12 +394,19 @@ async function startGame() {
       screenLog("[WRN] _mountOpfs niedostępne");
     }
 
-    // Start runner with game and save paths
     if (typeof engineModule._startRunner === "function") {
       screenLog("[WASM] Uruchamianie runnera gry...");
       try {
-        // Pass resolved paths to the runner
-        engineModule._startRunner(opfsDir, opfsDir);
+        const runnerArgs = [opfsDir, opfsDir];
+        try {
+          engineModule._startRunner(...runnerArgs);
+        } catch (firstErr) {
+          try {
+            engineModule._startRunner({ gamePath: opfsDir, savesPath: opfsDir });
+          } catch (secondErr) {
+            throw firstErr;
+          }
+        }
         screenLog("[OK] Gra uruchomiona!");
       } catch (runErr) {
         const msg = runErr && runErr.message ? runErr.message : String(runErr);
@@ -445,11 +434,6 @@ document.getElementById("start-btn").addEventListener("click", startGame);
    5. STEROWANIE DOTYKOWE
    ============================================================ */
 
-/**
- * Tworzy i wysyła KeyboardEvent dla danego klawisza.
- * @param {string} key – wartość klawisza (np. 'ArrowUp', 'z')
- * @param {string} type – 'keydown' lub 'keyup'
- */
 function dispatchKeyEvent(key, type = "keydown") {
   if (!key) return;
   const event = new KeyboardEvent(type, {
@@ -462,7 +446,6 @@ function dispatchKeyEvent(key, type = "keydown") {
   canvas?.dispatchEvent(event);
 }
 
-/** Inicjalizuje sterowanie dotykowe. */
 function initTouchControls() {
   const hasTouch = "ontouchstart" in window || navigator.maxTouchPoints > 0;
   const touchControls = document.getElementById("touch-controls");
@@ -549,7 +532,6 @@ async function init() {
     screenLog("[WRN] OPFS niedostępne w tej przeglądarce.");
   }
 
-  // Check WebGL support passively (don't create context on main canvas)
   const testCanvas = document.createElement("canvas");
   if (testCanvas.getContext("webgl") || testCanvas.getContext("webgl2")) {
     screenLog("[OK] WebGL dostępne.");

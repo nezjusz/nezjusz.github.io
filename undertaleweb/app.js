@@ -39,7 +39,11 @@ function screenLog(...args) {
   if (!logOutput) return;
   const timestamp = new Date().toLocaleTimeString();
   const text = args
-    .map((a) => (typeof a === "string" ? a : JSON.stringify(a, null, 2)))
+    .map((a) => {
+      if (typeof a === "string") return a;
+      if (a instanceof Error) return a.stack || a.message;
+      try { return JSON.stringify(a, null, 2); } catch { return String(a); }
+    })
     .join(" ");
 
   const lines = text.split("\n");
@@ -164,6 +168,9 @@ function isGameFile(name) {
   return lower === "data.win" || lower.endsWith(".ogg");
 }
 
+// The runner looks for exactly "data.win"
+function canonName(n) { return n.toLowerCase() === "data.win" ? "data.win" : n; }
+
 function normalizeGameFileName(name) {
   return (name || "").replace(/\\/g, "/").split("/").pop();
 }
@@ -179,7 +186,7 @@ async function processFiles(files) {
       zipFiles.push(file);
     } else if (isGameFile(safeName) && !seen.has(safeName)) {
       seen.add(safeName);
-      accepted.push(file);
+      accepted.push({ name: canonName(safeName), _file: file });
     }
   }
 
@@ -190,7 +197,7 @@ async function processFiles(files) {
         const safeName = normalizeGameFileName(zipEntry.name);
         if (!zipEntry.dir && isGameFile(safeName) && !seen.has(safeName)) {
           seen.add(safeName);
-          accepted.push({ name: safeName, _zipEntry: zipEntry });
+          accepted.push({ name: canonName(safeName), _zipEntry: zipEntry });
         }
       });
     } catch (err) {
@@ -209,7 +216,7 @@ async function processFiles(files) {
         const blob = new Blob([await file._zipEntry.async("blob")]);
         await saveFileToDB(file.name, blob);
       } else {
-        await saveFileToDB(file.name, file);
+        await saveFileToDB(file.name, file._file);
       }
       screenLog(`[OK] Zapisano: ${file.name}`);
     } catch (err) {
@@ -240,10 +247,9 @@ async function refreshFileList() {
         ? (size / (1024 * 1024)).toFixed(1) + " MB"
         : (size / 1024).toFixed(0) + " KB";
 
-    li.innerHTML = `
-      <span class="file-name">${f.name}</span>
-      <span class="file-size">${sizeStr}</span>
-    `;
+    const a = document.createElement("span"); a.textContent = f.name;
+    const b = document.createElement("span"); b.textContent = sizeStr;
+    li.append(a, b);
     fileListEl.appendChild(li);
   }
 
@@ -297,347 +303,194 @@ document.getElementById("reset-btn").addEventListener("click", async () => {
 });
 
 /* ============================================================
-   4. OPFS + WASM – uruchomienie gry
+   4. OPFS + WORKER – uruchomienie gry
    ============================================================ */
+// butterscotch.mjs is built with ENVIRONMENT=worker: it must run inside a Web Worker and
+// render into an OffscreenCanvas. The runner sees OPFS at /butterscotch.
+const GAME_SUBDIR = ["games", "undertale"];
+const SAVES_SUBDIR = ["saves", "undertale"];
+const GAME_PATH = "/butterscotch/games/undertale/data.win";
+const SAVES_PATH = "/butterscotch/saves/undertale";
+const RING_FRAMES = 8192; // power of two
+
+let worker = null, audioCtx = null;
+
+async function dirAt(root, parts) {
+  let d = root;
+  for (const p of parts) d = await d.getDirectoryHandle(p, { create: true });
+  return d;
+}
 
 async function copyFilesToOPFS() {
   const files = await getAllFilesFromDB();
-  if (!Array.isArray(files) || files.length === 0) {
-    throw new Error("Brak plików w IndexedDB.");
+  if (!files.some((f) => f.name === "data.win")) throw new Error("Brak data.win w wgranych plikach.");
+  const root = await navigator.storage.getDirectory();
+  const gameDir = await dirAt(root, GAME_SUBDIR);
+  await dirAt(root, SAVES_SUBDIR); // never wiped, so saves survive restarts
+  for (const f of files) {
+    try { // skip files that are already there
+      const existing = await (await gameDir.getFileHandle(f.name)).getFile();
+      if (existing.size === f.data.size) continue;
+    } catch {}
+    const w = await (await gameDir.getFileHandle(f.name, { create: true })).createWritable();
+    await w.write(f.data);
+    await w.close();
+    screenLog(`[OPFS] Skopiowano: ${f.name}`);
   }
+}
 
-  if (!navigator.storage || !navigator.storage.getDirectory) {
-    screenLog("[WRN] OPFS niedostępne – pomijam montowanie.");
-    return { gameDir: "/game", savesDir: "/saves" };
-  }
-
+async function setupAudio() {
   try {
-    const root = await navigator.storage.getDirectory();
-    
-    // Clean up old directories
-    try {
-      await root.removeEntry("game", { recursive: true });
-      await root.removeEntry("saves", { recursive: true });
-    } catch (e) {
-      // Directories might not exist yet, that's fine
-    }
-
-    const gameDir = await root.getDirectoryHandle("game", { create: true });
-    const savesDir = await root.getDirectoryHandle("saves", { create: true });
-
-    screenLog(`[OPFS] Kopiuję ${files.length} plik(i)...`);
-
-    for (const f of files) {
-      try {
-        const fileHandle = await gameDir.getFileHandle(f.name, { create: true });
-        const writable = await fileHandle.createWritable();
-        await writable.write(f.data);
-        await writable.close();
-        screenLog(`[OPFS] Skopiowano: ${f.name}`);
-      } catch (fileErr) {
-        screenLog(`[ERR] Błąd kopiowania ${f.name}:`, fileErr && fileErr.message ? fileErr.message : fileErr);
-        throw fileErr;
+    audioCtx = new AudioContext({ latencyHint: "interactive" });
+    const sab = new SharedArrayBuffer(8 + RING_FRAMES * 2 * 4);
+    const src = `
+      class RingPlayer extends AudioWorkletProcessor {
+        constructor(o) { super(); const { sab, frames } = o.processorOptions;
+          this.c = new Int32Array(sab, 0, 2); this.d = new Float32Array(sab, 8); this.m = frames - 1; }
+        process(_i, outs) {
+          const l = outs[0][0], r = outs[0][1] || l, n = l.length;
+          const w = Atomics.load(this.c, 0), rd = Atomics.load(this.c, 1);
+          if (((w - rd) | 0) < n) return true;
+          for (let i = 0; i < n; i++) { const j = ((rd + i) & this.m) * 2; l[i] = this.d[j]; r[i] = this.d[j + 1]; }
+          Atomics.store(this.c, 1, (rd + n) | 0);
+          return true;
+        }
       }
-    }
-
-    screenLog("[OPFS] Wszystkie pliki skopiowane pomyślnie.");
-    return { gameDir: CONFIG.GAME_DIR, savesDir: CONFIG.SAVES_DIR };
+      registerProcessor("ring-player", RingPlayer);`;
+    const url = URL.createObjectURL(new Blob([src], { type: "text/javascript" }));
+    await audioCtx.audioWorklet.addModule(url);
+    const node = new AudioWorkletNode(audioCtx, "ring-player", {
+      outputChannelCount: [2], processorOptions: { sab, frames: RING_FRAMES },
+    });
+    node.connect(audioCtx.destination);
+    await audioCtx.resume();
+    return sab;
   } catch (err) {
-    screenLog("[ERR] Błąd OPFS:", err && err.message ? err.message : err);
-    throw err;
+    screenLog("[WRN] Audio wyłączone:", err);
+    return null;
   }
 }
 
-async function initializeCanvas() {
-  canvas = document.getElementById("game-canvas");
-  if (!canvas) {
-    throw new Error("Canvas element nie znaleziony!");
-  }
-
-  // Set canvas size
-  canvas.width = 640;
-  canvas.height = 480;
-  
-  // Ensure canvas is visible and properly sized
-  canvas.style.display = "block";
-  canvas.style.width = "100%";
-  canvas.style.height = "100%";
-  
-  screenLog(`[CANVAS] Wymiary: ${canvas.width}x${canvas.height}`);
-
-  // Test WebGL context
-  const ctx = canvas.getContext("webgl") || canvas.getContext("webgl2");
-  if (!ctx) {
-    throw new Error("Nie można uzyskać kontekstu WebGL!");
-  }
-  
-  screenLog("[CANVAS] WebGL kontekst gotowy");
-  
-  // Clear canvas to test rendering
-  ctx.clearColor(0, 0, 0, 1);
-  ctx.clear(ctx.COLOR_BUFFER_BIT);
-  screenLog("[CANVAS] Canvas wyczyszczony i gotowy do renderingu");
+function resetCanvas() {
+  // A canvas whose control went to a worker can't be reused – swap in a fresh one.
+  const old = document.getElementById("game-canvas");
+  const fresh = document.createElement("canvas");
+  fresh.id = "game-canvas"; fresh.width = 640; fresh.height = 480;
+  old.replaceWith(fresh);
+  canvas = fresh;
 }
 
-async function loadAndValidateWASM() {
-  screenLog("[WASM] Sprawdzanie modułu Butterscotch...");
-  
-  try {
-    const response = await fetch(CONFIG.WASM_URL);
-    
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-    
-    const text = await response.text();
-    screenLog(`[WASM] Rozmiar pliku: ${text.length} znaków`);
-    
-    // Check if file is valid
-    if (text.length < 100) {
-      throw new Error("Plik butterscotch.mjs jest zbyt mały - wygląda na uszkodzony!");
-    }
-    
-    if (!text.includes("export") && !text.includes("Module")) {
-      throw new Error("Plik nie zawiera prawidłowego modułu JavaScript/WASM!");
-    }
-    
-    screenLog("[WASM] ✓ Plik modułu wygląda prawidłowo");
-    
-  } catch (err) {
-    throw new Error(`Błąd ładowania butterscotch.mjs: ${err.message}`);
-  }
+function showUpload() {
+  document.getElementById("game-screen").classList.remove("active");
+  document.getElementById("upload-screen").classList.add("active");
+}
+
+function endGame() {
+  if (worker) { worker.terminate(); worker = null; }
+  if (audioCtx) { audioCtx.close().catch(() => {}); audioCtx = null; }
+  held.clear();
+  gameRunning = false;
+  resetCanvas();
+  showUpload();
 }
 
 async function startGame() {
-  if (gameRunning) {
-    screenLog("[WRN] Gra już jest uruchomiona!");
-    return;
-  }
-
+  if (gameRunning) return;
   gameRunning = true;
-
   try {
-    screenLog("[START] ========== ROZPOCZĘCIE GRY ==========");
+    if (!window.crossOriginIsolated || typeof SharedArrayBuffer === "undefined")
+      throw new Error("Strona nie jest cross-origin isolated (brak SharedArrayBuffer). Odśwież stronę – service worker musi się najpierw zarejestrować.");
+    if (!navigator.storage?.getDirectory) throw new Error("Ta przeglądarka nie wspiera OPFS.");
 
-    // Hide upload screen, show game screen
+    screenLog("[START] Kopiowanie plików do OPFS...");
+    await copyFilesToOPFS();
+
     document.getElementById("upload-screen").classList.remove("active");
     document.getElementById("game-screen").classList.add("active");
+    document.getElementById("log-panel").classList.remove("collapsed");
 
-    // Initialize canvas
-    screenLog("[CANVAS] Inicjalizacja canvas...");
-    await initializeCanvas();
+    const audioSab = await setupAudio();
+    canvas = document.getElementById("game-canvas");
+    // IMPORTANT: never call canvas.getContext() on this element – it would block transferControlToOffscreen().
+    const offscreen = canvas.transferControlToOffscreen();
 
-    // Validate WASM module exists and is valid
-    screenLog("[WASM] Walidacja modułu...");
-    await loadAndValidateWASM();
-
-    // Prepare OPFS
-    screenLog("[OPFS] Przygotowywanie systemu plików...");
-    const { gameDir, savesDir } = await copyFilesToOPFS();
-    screenLog(`[OPFS] Ścieżki: gameDir=${gameDir}, savesDir=${savesDir}`);
-
-    // Import WASM module
-    screenLog("[WASM] Importowanie modułu...");
-    let wasmModule;
-    try {
-      wasmModule = await import(/* @vite-ignore */ CONFIG.WASM_URL);
-      screenLog("[WASM] Moduł zaimportowany pomyślnie");
-    } catch (importErr) {
-      const errMsg = importErr && importErr.message ? importErr.message : String(importErr);
-      screenLog("[ERR] Import modułu WASM nie powiódł się:", errMsg);
-      screenLog("[ERR] Czy plik butterscotch.mjs istnieje i zawiera prawidłowy moduł?");
-      throw new Error(`Nie można załadować ${CONFIG.WASM_URL}: ${errMsg}`);
-    }
-
-    // Check if default export exists
-    if (!wasmModule || !wasmModule.default) {
-      screenLog("[ERR] Moduł nie ma default export");
-      screenLog("[ERR] Zawartość modułu:", Object.keys(wasmModule || {}));
-      throw new Error("Moduł WASM nie ma default export!");
-    }
-
-    screenLog("[WASM] Inicjalizacja instancji modułu...");
-
-    // Initialize WASM module with proper parameters
-    let moduleInstance;
-    try {
-      moduleInstance = await wasmModule.default({
-        canvas: canvas,
-        gamePath: gameDir,
-        savesPath: savesDir,
-        
-        // Logging functions
-        print: (text) => {
-          console.log("[GAME]", text);
-          screenLog("[GAME]", text);
-        },
-        printErr: (text) => {
-          console.error("[GAME-ERR]", text);
-          screenLog("[GAME-ERR]", text);
-        },
-        
-        // Runtime callbacks
-        onRuntimeInitialized: () => {
-          screenLog("[WASM] ✓ Runtime zainicjalizowany");
-        },
-        
-        onAbort: (msg) => {
-          screenLog("[ERR] ✗ WASM abort:", msg);
-          gameRunning = false;
-        },
-        
-        // Additional options
-        locateFile: (fileName) => {
-          return `./${fileName}`;
-        },
-      });
-    } catch (initErr) {
-      const errMsg = initErr && initErr.message ? initErr.message : String(initErr);
-      screenLog("[ERR] Błąd inicjalizacji modułu:", errMsg);
-      throw initErr;
-    }
-
-    if (!moduleInstance) {
-      throw new Error("WASM moduł zwrócił null - inicjalizacja nie powiodła się!");
-    }
-
-    engineModule = moduleInstance;
-    gameContext = moduleInstance;
-    
-    screenLog("[WASM] ✓ Moduł WASM załadowany i uruchomiony");
-    screenLog("[START] ========== GRA POWINNA DZIAŁAĆ ==========");
-    screenLog("[INFO] Naciśnij F aby włączyć fullscreen");
-    
-    // Give WASM some time to render
-    await new Promise(resolve => setTimeout(resolve, 500));
-    screenLog("[INFO] Czekanie na pierwszy render...");
-
+    worker = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
+    worker.onerror = (e) => {
+      screenLog("[ERR] Worker:", `${e.message} (${e.filename}:${e.lineno})`);
+    };
+    worker.onmessage = (e) => {
+      const m = e.data || {};
+      if (m.type === "log") screenLog(m.text);
+      else if (m.type === "error") { screenLog("[ERR]", m.text); setTimeout(endGame, 4000); }
+      else if (m.type === "started") {
+        screenLog("[START] Runner uruchomiony. F4 = pełny ekran, F9 = logi.");
+        setTimeout(() => document.getElementById("log-panel").classList.add("collapsed"), 5000);
+      }
+      else if (m.type === "windowTitle") document.title = m.title || "Undertale Web Player";
+      else if (m.type === "runnerExit") endGame();
+    };
+    worker.postMessage({
+      type: "start", canvas: offscreen, gamePath: GAME_PATH, savesPath: SAVES_PATH,
+      sampleRate: audioCtx ? audioCtx.sampleRate : 48000,
+      audioSab, ringFrames: RING_FRAMES,
+    }, [offscreen]);
   } catch (err) {
-    const msg = err && err.message ? err.message : String(err);
-    screenLog("[ERR] ✗ Błąd uruchamiania gry:");
-    screenLog("[ERR]", msg);
-    if (err && err.stack) {
-      screenLog("[ERR] Stack trace:");
-      screenLog(err.stack);
-    }
-    
-    gameRunning = false;
-    
-    // Return to upload screen after 3 seconds
-    setTimeout(() => {
-      document.getElementById("upload-screen").classList.add("active");
-      document.getElementById("game-screen").classList.remove("active");
-      screenLog("[ERR] Powrót do ekranu upload");
-    }, 3000);
+    screenLog("[ERR] Błąd uruchamiania gry:", err);
+    endGame();
   }
 }
 
 document.getElementById("start-btn").addEventListener("click", startGame);
 
 /* ============================================================
-   5. STEROWANIE DOTYKOWE
+   5. KLAWIATURA + STEROWANIE DOTYKOWE
    ============================================================ */
+// GameMaker vk_* codes equal the browser's legacy keyCode values.
+const held = new Set();
 
-function dispatchKeyEvent(key, type = "keydown") {
-  if (!key) return;
-  
-  // Map key names to proper KeyboardEvent codes
-  let code = key;
-  if (key.startsWith("Arrow")) {
-    code = key; // ArrowUp, ArrowDown, ArrowLeft, ArrowRight
-  } else if (key.length === 1) {
-    code = `Key${key.toUpperCase()}`;
-  }
-
-  const event = new KeyboardEvent(type, {
-    key: key,
-    code: code,
-    bubbles: true,
-    cancelable: true,
-  });
-  
-  document.dispatchEvent(event);
-  if (canvas) {
-    canvas.dispatchEvent(event);
-  }
+function setKey(code, down) {
+  if (!worker || !(code > 0 && code < 256)) return;
+  if (down === held.has(code)) return;
+  down ? held.add(code) : held.delete(code);
+  worker.postMessage({ type: "key", code, down });
 }
+
+const KEY_NAMES = { ArrowUp: 38, ArrowDown: 40, ArrowLeft: 37, ArrowRight: 39 };
+const codeFromName = (k) => KEY_NAMES[k] ?? k.toUpperCase().charCodeAt(0);
+
+const BLOCKED = new Set([8, 9, 32, 37, 38, 39, 40]);
+function toggleFullscreen() {
+  if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch((e) => screenLog("[WRN] Fullscreen:", e.message));
+  else document.exitFullscreen().catch(() => {});
+}
+
+window.addEventListener("keydown", (e) => {
+  if (!gameRunning) return;
+  if (e.keyCode === 115) { e.preventDefault(); if (!e.repeat) toggleFullscreen(); return; } // F4
+  if (e.keyCode === 120) { e.preventDefault(); if (!e.repeat) document.getElementById("log-panel").classList.toggle("collapsed"); return; } // F9
+  if (BLOCKED.has(e.keyCode)) e.preventDefault();
+  if (!e.repeat) setKey(e.keyCode, true);
+});
+window.addEventListener("keyup", (e) => { if (gameRunning) setKey(e.keyCode, false); });
+window.addEventListener("blur", () => { for (const c of [...held]) setKey(c, false); });
 
 function initTouchControls() {
+  const tc = document.getElementById("touch-controls");
   const hasTouch = "ontouchstart" in window || (navigator.maxTouchPoints || 0) > 0;
-  const touchControls = document.getElementById("touch-controls");
-
-  if (!hasTouch) {
-    touchControls.classList.add("hidden");
-    screenLog("[TOUCH] Urządzenie bez obsługi dotyku.");
-    return;
-  }
-
-  touchControls.classList.remove("hidden");
-  screenLog("[TOUCH] ✓ Sterowanie dotykowe aktywne");
-
-  // D-Pad buttons
-  document.querySelectorAll(".dpad-btn").forEach((btn) => {
-    const key = btn.dataset.key;
-
-    const onStart = (e) => {
-      e.preventDefault();
-      dispatchKeyEvent(key, "keydown");
-      btn.classList.add("active");
-    };
-    const onEnd = (e) => {
-      e.preventDefault();
-      dispatchKeyEvent(key, "keyup");
-      btn.classList.remove("active");
-    };
-
-    btn.addEventListener("touchstart", onStart, { passive: false });
-    btn.addEventListener("touchend", onEnd, { passive: false });
-    btn.addEventListener("touchcancel", onEnd, { passive: false });
-    btn.addEventListener("mousedown", onStart);
-    btn.addEventListener("mouseup", onEnd);
-    btn.addEventListener("mouseleave", onEnd);
-  });
-
-  // Action buttons
-  document.querySelectorAll(".action-btn").forEach((btn) => {
-    const key = btn.dataset.key;
-
-    const onStart = (e) => {
-      e.preventDefault();
-      dispatchKeyEvent(key, "keydown");
-      btn.classList.add("active");
-    };
-    const onEnd = (e) => {
-      e.preventDefault();
-      dispatchKeyEvent(key, "keyup");
-      btn.classList.remove("active");
-    };
-
-    btn.addEventListener("touchstart", onStart, { passive: false });
-    btn.addEventListener("touchend", onEnd, { passive: false });
-    btn.addEventListener("touchcancel", onEnd, { passive: false });
-    btn.addEventListener("mousedown", onStart);
-    btn.addEventListener("mouseup", onEnd);
-    btn.addEventListener("mouseleave", onEnd);
+  if (!hasTouch) { tc.classList.add("hidden"); return; }
+  tc.classList.remove("hidden");
+  document.querySelectorAll(".dpad-btn, .action-btn").forEach((btn) => {
+    const code = codeFromName(btn.dataset.key);
+    const on = (e) => { e.preventDefault(); setKey(code, true); btn.classList.add("active"); };
+    const off = (e) => { e.preventDefault(); setKey(code, false); btn.classList.remove("active"); };
+    btn.addEventListener("touchstart", on, { passive: false });
+    btn.addEventListener("touchend", off, { passive: false });
+    btn.addEventListener("touchcancel", off, { passive: false });
+    btn.addEventListener("mousedown", on);
+    btn.addEventListener("mouseup", off);
+    btn.addEventListener("mouseleave", off);
   });
 }
-
-/* ============================================================
-   6. FULLSCREEN
-   ============================================================ */
-
-document.addEventListener("keydown", (e) => {
-  if (e.key === "f" || e.key === "F") {
-    e.preventDefault();
-    if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen().catch((err) => {
-        screenLog("[WRN] Fullscreen niedostępny:", err.message);
-      });
-    } else {
-      document.exitFullscreen().catch(() => {});
-    }
-  }
-});
 
 /* ============================================================
    7. INICJALIZACJA
@@ -648,11 +501,10 @@ async function init() {
   
   screenLog("╔════════════════════════════════════╗");
   screenLog("║   UNDERTALE WEB PLAYER v2.1        ║");
-  screenLog("║      BLACK SCREEN DEBUGGING         ║");
+  screenLog("║                                    ║");
   screenLog("╚════════════════════════════════════╝");
   
   screenLog(`[CONFIG] DB: ${CONFIG.DB_NAME}`);
-  screenLog(`[CONFIG] WASM URL: ${CONFIG.WASM_URL}`);
 
   // Check browser capabilities
   screenLog("[CHECK] Sprawdzanie możliwości przeglądarki...");
@@ -673,6 +525,8 @@ async function init() {
     screenLog("[ERR] ✗ WebGL niedostępne!");
   }
 
+  screenLog(typeof OffscreenCanvas !== "undefined" ? "[OK] ✓ OffscreenCanvas" : "[ERR] ✗ Brak OffscreenCanvas!");
+
   // WebAssembly
   if (typeof WebAssembly === "object") {
     screenLog("[OK] ✓ WebAssembly wspierane");
@@ -692,19 +546,6 @@ async function init() {
     screenLog("[OK] ✓ SharedArrayBuffer dostępne");
   } else {
     screenLog("[WRN] ⚠ SharedArrayBuffer niedostępne");
-  }
-
-  // Check WASM file exists
-  screenLog("[WASM] Sprawdzanie dostępności butterscotch.mjs...");
-  try {
-    const resp = await fetch(CONFIG.WASM_URL, { method: "HEAD" });
-    if (resp.ok) {
-      screenLog(`[OK] ✓ butterscotch.mjs jest dostępny (${resp.headers.get('content-type')})`);
-    } else {
-      screenLog(`[ERR] ✗ butterscotch.mjs zwrócił HTTP ${resp.status}`);
-    }
-  } catch (e) {
-    screenLog(`[ERR] ✗ butterscotch.mjs niedostępny: ${e.message}`);
   }
 
   screenLog("[INIT] Ładowanie plików z IndexedDB...");

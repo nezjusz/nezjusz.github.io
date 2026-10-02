@@ -54,6 +54,8 @@
         <canvas id="game-canvas" width="640" height="480"></canvas>
       </div>
 
+      <button id="back-btn" class="retro-btn danger game-back" type="button">◀ POWRÓT</button>
+
       <!-- Sterowanie dotykowe -->
       <div id="touch-controls" class="touch-controls hidden">
         <div class="dpad">
@@ -73,9 +75,9 @@
       <div id="log-panel" class="log-panel">
         <div class="log-header">
           <span class="retro-label">DIAGNOSTYKA</span>
-          <button id="clear-log" class="log-clear">✕</button>
+          <button id="clear-log" class="log-clear" type="button" aria-label="Wyczyść logi">✕</button>
         </div>
-        <pre id="log-output" class="log-output"></pre>
+        <pre id="log-output" class="log-output" role="log" aria-live="polite" aria-label="Dziennik diagnostyczny"></pre>
       </div>
     </section>
   </div>

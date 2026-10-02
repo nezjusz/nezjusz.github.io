@@ -54,7 +54,10 @@ if (typeof window === 'undefined') {
                         headers: newHeaders,
                     });
                 })
-                .catch((e) => console.error(e))
+                .catch((e) => {
+                    console.error(e);
+                    throw e; // respondWith(undefined) surfaces as an opaque TypeError instead
+                })
         );
     });
 

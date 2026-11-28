@@ -131,11 +131,12 @@ function openDB() {
   return dbPromise;
 }
 
-async function saveFileToDB(name, data) {
+async function saveImportedFiles(files) {
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(CONFIG.STORE_NAME, "readwrite");
-    tx.objectStore(CONFIG.STORE_NAME).put({ name, data });
+    const store = tx.objectStore(CONFIG.STORE_NAME);
+    for (const record of files) store.put(record);
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
     tx.onabort = () => reject(tx.error);
@@ -186,37 +187,62 @@ function normalizeGameFileName(name) {
   return (name || "").replace(/\\/g, "/").split("/").pop();
 }
 
+const MAX_GAME_ENTRY_BYTES = 256 * 1024 * 1024;
+const MAX_GAME_IMPORT_BYTES = 512 * 1024 * 1024;
+const MAX_GAME_FILES = 1024;
+let importingGame = false;
+
 async function processFiles(files) {
+  if (importingGame || gameRunning) return;
+  importingGame = true;
+  try {
+    await importGameFiles(files);
+  } finally {
+    importingGame = false;
+  }
+}
+
+async function importGameFiles(files) {
   const accepted = [];
   const zipFiles = [];
   const seen = new Set();
+  let remainingBytes = MAX_GAME_IMPORT_BYTES;
 
-  const add = (safeName, payload) => {
-    const name = canonName(safeName);
-    const key = name.toLowerCase(); // dedupe on the stored key, not the raw name
+  async function add(name, getBlob) {
+    const key = name.toLowerCase();
     if (seen.has(key)) return;
+    if (accepted.length >= MAX_GAME_FILES) throw new Error("Za dużo plików gry.");
+    const limit = Math.min(MAX_GAME_ENTRY_BYTES, remainingBytes);
+    const data = await getBlob(limit);
+    if (data.size > limit) throw new Error("Przekroczono limit rozmiaru importu.");
+    remainingBytes -= data.size;
     seen.add(key);
-    accepted.push({ name, ...payload });
-  };
+    accepted.push({ name: canonName(name), data });
+  }
 
-  for (const file of files) {
-    if (file.name.toLowerCase().endsWith(".zip")) zipFiles.push(file);
-    else add(normalizeGameFileName(file.name), { _file: file });
+  const input = Array.from(files);
+  if (input.length > MAX_GAME_FILES || input.reduce((total, file) => total + file.size, 0) > MAX_GAME_IMPORT_BYTES) {
+    throw new Error("Za dużo danych w jednym imporcie.");
+  }
+  for (const file of input) {
+    const name = normalizeGameFileName(file.name);
+    if (name.toLowerCase().endsWith(".zip")) zipFiles.push(file);
+    else if (isGameFile(name)) await add(name, () => file);
   }
 
   for (const zipFile of zipFiles) {
-    if (typeof JSZip === "undefined") {
-      screenLog("[ERR] Brak biblioteki JSZip (nie udało się pobrać z CDN) – pliki .zip są niedostępne.");
-      break;
-    }
+    const zip = await openBoundedZip(zipFile, {
+      maxInputBytes: MAX_GAME_IMPORT_BYTES, maxEntries: MAX_GAME_FILES, maxTotalBytes: remainingBytes,
+    });
     try {
-      const zip = await JSZip.loadAsync(zipFile);
-      zip.forEach((_relativePath, zipEntry) => {
+      for (const zipEntry of zip.entries) {
         const safeName = normalizeGameFileName(zipEntry.name);
-        if (!zipEntry.dir && isGameFile(safeName)) add(safeName, { _zipEntry: zipEntry });
-      });
-    } catch (err) {
-      screenLog("[ERR] Błąd rozpakowywania ZIP:", err && err.message ? err.message : err);
+        if (!zipEntry.dir && isGameFile(safeName)) {
+          await add(safeName, limit => zip.read(zipEntry, limit));
+        }
+      }
+    } finally {
+      zip.close();
     }
   }
 
@@ -225,20 +251,8 @@ async function processFiles(files) {
     return;
   }
 
-  for (const file of accepted) {
-    try {
-      if (file._zipEntry) {
-        const blob = new Blob([await file._zipEntry.async("blob")]);
-        await saveFileToDB(file.name, blob);
-      } else {
-        await saveFileToDB(file.name, file._file);
-      }
-      screenLog(`[OK] Zapisano: ${file.name}`);
-    } catch (err) {
-      screenLog(`[ERR] Nie udało się zapisać ${file.name}:`, err && err.message ? err.message : err);
-    }
-  }
-
+  await saveImportedFiles(accepted);
+  for (const { name } of accepted) screenLog(`[OK] Zapisano: ${name}`);
   await refreshFileList();
 }
 
@@ -304,7 +318,7 @@ async function refreshFileList() {
 });
 
 dropZone.addEventListener("drop", (e) => {
-  const files = e.dataTransfer && e.dataTransfer.files;
+  const files = Array.from(e.dataTransfer?.files || []);
   if (files && files.length) guarded(processFiles)(files);
 });
 
@@ -314,16 +328,19 @@ dropZone.addEventListener("drop", (e) => {
 });
 
 fileInput.addEventListener("change", () => {
-  if (fileInput.files && fileInput.files.length) guarded(processFiles)(fileInput.files);
+  const files = Array.from(fileInput.files);
   fileInput.value = "";
+  if (files.length) guarded(processFiles)(files);
 });
 
 folderInput.addEventListener("change", () => {
-  if (folderInput.files && folderInput.files.length) guarded(processFiles)(folderInput.files);
+  const files = Array.from(folderInput.files);
   folderInput.value = "";
+  if (files.length) guarded(processFiles)(files);
 });
 
 document.getElementById("reset-btn").addEventListener("click", guarded(async () => {
+  if (importingGame || gameRunning) return;
   await clearDB();
   await clearGameOPFS();
   screenLog("[OK] Wyczyszczono IndexedDB i OPFS.");
@@ -388,26 +405,7 @@ async function setupAudio() {
   try {
     audioCtx = new AudioContext({ latencyHint: "interactive" });
     const sab = new SharedArrayBuffer(8 + RING_FRAMES * 2 * 4);
-    const src = `
-      class RingPlayer extends AudioWorkletProcessor {
-        constructor(o) { super(); const { sab, frames } = o.processorOptions;
-          this.c = new Int32Array(sab, 0, 2); this.d = new Float32Array(sab, 8); this.m = frames - 1; }
-        process(_i, outs) {
-          const l = outs[0][0], r = outs[0][1] || l, n = l.length;
-          const w = Atomics.load(this.c, 0), rd = Atomics.load(this.c, 1);
-          if (((w - rd) | 0) < n) return true;
-          for (let i = 0; i < n; i++) { const j = ((rd + i) & this.m) * 2; l[i] = this.d[j]; r[i] = this.d[j + 1]; }
-          Atomics.store(this.c, 1, (rd + n) | 0);
-          return true;
-        }
-      }
-      registerProcessor("ring-player", RingPlayer);`;
-    const url = URL.createObjectURL(new Blob([src], { type: "text/javascript" }));
-    try {
-      await audioCtx.audioWorklet.addModule(url);
-    } finally {
-      URL.revokeObjectURL(url);
-    }
+    await audioCtx.audioWorklet.addModule(new URL("./audio-worklet.js", import.meta.url));
     audioNode = new AudioWorkletNode(audioCtx, "ring-player", {
       outputChannelCount: [2], processorOptions: { sab, frames: RING_FRAMES },
     });
@@ -461,7 +459,7 @@ function endGame() {
 }
 
 async function startGame() {
-  if (gameRunning) return;
+  if (gameRunning || importingGame) return;
   gameRunning = true;
   try {
     if (!window.crossOriginIsolated || typeof SharedArrayBuffer === "undefined")
@@ -481,22 +479,28 @@ async function startGame() {
     // IMPORTANT: never call canvas.getContext() on this element – it would block transferControlToOffscreen().
     const offscreen = el.transferControlToOffscreen();
 
-    worker = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
-    worker.onerror = (e) => {
+    const session = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
+    worker = session;
+    session.onerror = (e) => {
       screenLog("[ERR] Worker:", `${e.message || "nieznany błąd"} (${e.filename}:${e.lineno})`);
       endGame();
     };
-    worker.onmessage = (e) => {
+    session.onmessage = (e) => {
       const m = e.data || {};
       if (m.type === "log") screenLog(m.text);
-      else if (m.type === "error") { screenLog("[ERR]", m.text); setTimeout(endGame, 4000); }
+      else if (m.type === "error") {
+        screenLog("[ERR]", m.text);
+        setTimeout(() => { if (worker === session) endGame(); }, 4000);
+      }
       else if (m.type === "started") {
         screenLog("[START] Runner uruchomiony. F4 = pełny ekran, F9 = logi.");
-        setTimeout(() => document.getElementById("log-panel").classList.add("collapsed"), 5000);
+        setTimeout(() => {
+          if (worker === session) document.getElementById("log-panel").classList.add("collapsed");
+        }, 5000);
       }
       else if (m.type === "runnerExit") { screenLog("[STOP] Runner zakończył sesję."); endGame(); }
     };
-    worker.postMessage({
+    session.postMessage({
       type: "start", canvas: offscreen, gamePath: GAME_PATH, savesPath: SAVES_PATH,
       sampleRate: audioCtx ? audioCtx.sampleRate : 48000,
       audioSab, ringFrames: RING_FRAMES,

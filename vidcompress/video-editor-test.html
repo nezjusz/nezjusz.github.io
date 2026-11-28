@@ -2,7 +2,8 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' blob: 'wasm-unsafe-eval' 'sha256-vWkbZTCpZz5MehJOMU1egk6xcdM0pdokPC5zdlpyNmc='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' blob:; worker-src 'self' blob:; base-uri 'none'; object-src 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>Kerf — on-device video cutter</title>
@@ -354,6 +355,12 @@
 
   input[type=file]{ display:none; }
 
+  @media (max-width: 880px), (max-height: 640px){
+    body{ height:auto; }
+    .stage{ flex:0 0 auto; }
+    .preview-frame{ flex:0 0 auto; height:clamp(220px, 55vh, 560px); }
+  }
+
   @media (max-width: 880px){
     .stage{ flex-direction:column; }
     .left-col{ width:auto; margin-right:0; margin-bottom:16px; flex-direction:row; flex-wrap:wrap; }
@@ -605,6 +612,7 @@
 <input type="file" id="ovAudioInput" accept="audio/*">
 
 <script src="ffmpeg.min.js"></script>
+<script src="media-utils.js"></script>
 <script>
 (() => {
   "use strict";
@@ -1862,18 +1870,18 @@
 
   // ---------- export via ffmpeg.wasm ----------
   let ffmpeg = null;
+  const ffmpegMessages = [];
   const { createFFmpeg, fetchFile } = window.FFmpeg || {};
 
   async function ensureFFmpeg() {
-    if (ffmpeg) return ffmpeg;
+    if (ffmpeg?.isLoaded()) return ffmpeg;
     ffmpeg = createFFmpeg({
       log: false,
-      // Pin the single-threaded core to a version that matches the
-      // @ffmpeg/ffmpeg wrapper (0.11.x). A mismatch between the wrapper and the
-      // core (or loading the multithreaded core without COOP/COEP) is what throws
-      // "RuntimeError: function signature mismatch" on the first run. Using an
-      // absolute CDN URL keeps the wasm/worker resolution stable.
       corePath: new URL('ffmpeg-core.js', document.location.href).href,
+      logger: ({ message }) => {
+        ffmpegMessages.push(message);
+        if (ffmpegMessages.length > 12) ffmpegMessages.shift();
+      },
       progress: ({ ratio }) => {
         if (ratio >= 0 && ratio <= 1) {
           progressFill.style.width = (ratio * 100).toFixed(0) + '%';
@@ -1894,9 +1902,12 @@
     resultWrap.classList.remove('active');
     progressFill.style.width = '0%';
     setStatus('init', 'Rendering');
+    const workingFiles = new Set();
+    let ff;
 
     try {
-      const ff = await ensureFFmpeg();
+      ffmpegMessages.length = 0;
+      ff = await ensureFFmpeg();
       const precise = el('preciseToggle').checked;
       const mute = el('muteToggle').checked;
       // Mixing clips of different frame rates and/or resolutions through a
@@ -1923,6 +1934,8 @@
         progressLabel.textContent = `Trimming clip ${i+1} of ${clips.length}…`;
         const inputName = `src${i}${extOf(c.name)}`;
         const outputName = `seg${i}.mp4`;
+        workingFiles.add(inputName);
+        workingFiles.add(outputName);
         ff.FS('writeFile', inputName, await fetchFile(c.file));
 
         const dur = (c.outPoint - c.inPoint).toFixed(3);
@@ -1931,7 +1944,7 @@
         const args = ['-ss', ss, '-i', inputName];
 
         if (reencode) {
-          if (effMute) {
+          if (effMute || !await hasAudio(ff, inputName)) {
             // A muted clip still needs an audio stream when it's joining
             // others, or the concat demuxer sees mismatched stream layouts
             // and the join breaks — so splice in true silence instead of
@@ -1939,11 +1952,11 @@
             args.push('-f', 'lavfi', '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100');
             args.push('-map', '0:v:0', '-map', '1:a:0', '-shortest');
           } else {
-            args.push('-map', '0:v:0', '-map', '0:a:0?');
+            args.push('-map', '0:v:0', '-map', '0:a:0', '-af', 'apad');
           }
           // -threads 1 sidesteps a "function signature mismatch" crash the
           // multi-threaded ffmpeg.wasm core hits on some filter chains.
-          args.push('-t', dur, '-threads', '1', '-vf', normalizeVf, '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-c:a', 'aac');
+          args.push('-t', dur, '-threads', '1', '-vf', normalizeVf, '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-c:a', 'aac', '-ac', '2', '-ar', '44100');
         } else {
           args.push('-t', dur, '-c:v', 'copy');
           if (effMute) { args.push('-an'); } else { args.push('-c:a', 'copy'); }
@@ -1951,11 +1964,12 @@
         args.push(outputName);
         await ff.run(...args);
         segmentNames.push(outputName);
-        try { ff.FS('unlink', inputName); } catch(e){}
+        removeWorkingFiles(ff, inputName);
       }
 
       progressLabel.textContent = 'Joining clips…';
       let baseName = 'base.mp4';
+      workingFiles.add(baseName);
 
       if (segmentNames.length === 1) {
         baseName = segmentNames[0];
@@ -1966,6 +1980,7 @@
         }
       } else {
         const listContent = segmentNames.map(n => `file '${n}'`).join('\n');
+        workingFiles.add('list.txt');
         ff.FS('writeFile', 'list.txt', new TextEncoder().encode(listContent));
         const concatArgs = ['-f', 'concat', '-safe', '0', '-i', 'list.txt'];
         // Segments are already normalized (and given matching audio
@@ -1977,9 +1992,21 @@
       }
 
       let outName = baseName;
-      if (overlays.length) {
+      const visualOverlays = overlays.some(overlay => overlay.type !== 'audio');
+      const audioOverlays = mute ? [] : overlays.filter(overlay => overlay.file &&
+        (overlay.type === 'audio' || (overlay.type === 'video' && !overlay.muted)));
+      let videoName = baseName;
+      if (visualOverlays) {
         progressLabel.textContent = 'Compositing overlays…';
-        outName = await compositeOverlays(ff, baseName, targetW, targetH, targetFps);
+        videoName = 'rec.webm';
+        workingFiles.add(videoName);
+        await compositeOverlays(ff, baseName, videoName, targetW, targetH, targetFps);
+      }
+      if (visualOverlays || audioOverlays.length) {
+        progressLabel.textContent = 'Mixing audio…';
+        outName = 'output.mp4';
+        workingFiles.add(outName);
+        await muxOverlays(ff, videoName, baseName, outName, audioOverlays, workingFiles, mute);
       }
 
       const data = ff.FS('readFile', outName);
@@ -1993,14 +2020,67 @@
       progressLabel.textContent = 'Done.';
       progressFill.style.width = '100%';
     } catch (err) {
-      console.error(err);
+      console.error(err, ffmpegMessages.join('\n'));
       progressLabel.textContent = 'Export failed — see console for details.';
       setStatus('error', 'Render failed');
     } finally {
+      if (ff) removeWorkingFiles(ff, ...workingFiles);
       exportBtn.disabled = false;
       if (statusPill.classList.contains('status-init')) setStatus('ready', 'Engine ready');
     }
   });
+
+  async function hasAudio(ff, filename) {
+    const probe = 'audio-probe.wav';
+    removeWorkingFiles(ff, probe);
+    try {
+      await ff.run('-i', filename, '-vn', '-map', '0:a:0?', '-t', '0.05', '-ar', '8000', '-ac', '1', probe);
+      return ff.FS('stat', probe).size > 0;
+    } catch {
+      return false;
+    } finally {
+      removeWorkingFiles(ff, probe);
+    }
+  }
+
+  async function muxOverlays(ff, video, base, output, layers, workingFiles, mute) {
+    const args = ['-i', video];
+    if (video !== base) args.push('-i', base);
+    const baseIndex = video === base ? 0 : 1;
+    const total = totalDuration();
+    const streams = [];
+    const filters = [];
+    if (!mute && await hasAudio(ff, base)) streams.push(`[${baseIndex}:a:0]`);
+    let inputIndex = baseIndex + 1;
+    for (const layer of layers) {
+      const start = Math.max(0, layer.start);
+      const duration = Math.min(layer.duration, layer.outPoint - layer.inPoint, total - start);
+      if (!(duration > 0)) continue;
+      const name = `overlay-audio-${inputIndex}${extOf(layer.name)}`;
+      workingFiles.add(name);
+      ff.FS('writeFile', name, await fetchFile(layer.file));
+      if (layer.type === 'video' && !await hasAudio(ff, name)) {
+        removeWorkingFiles(ff, name);
+        continue;
+      }
+      args.push('-ss', String(layer.inPoint), '-t', String(duration), '-i', name);
+      const label = 'layer' + inputIndex;
+      const delay = Math.round(start * 1000);
+      filters.push(`[${inputIndex}:a:0]aresample=44100,aformat=channel_layouts=stereo,volume=${layer.volume},adelay=${delay}|${delay}[${label}]`);
+      streams.push('[' + label + ']');
+      inputIndex++;
+    }
+    if (filters.length) {
+      filters.push(streams.join('') + `amix=inputs=${streams.length}:duration=longest:dropout_transition=0,apad[mixed]`);
+      args.push('-filter_complex', filters.join(';'));
+    }
+    args.push('-map', '0:v:0');
+    if (filters.length) args.push('-map', '[mixed]', '-c:a', 'aac');
+    else if (!mute) args.push('-map', `${baseIndex}:a:0?`, '-c:a', 'copy');
+    if (video === base) args.push('-c:v', 'copy');
+    else args.push('-c:v', 'libx264', '-threads', '1', '-preset', 'veryfast', '-crf', '20');
+    await ff.run(...args, '-t', String(total), output);
+  }
 
   // ---------- overlay compositing (bake overlays into the exported video) ----------
   function roundRectPath(ctx, x, y, w, h, r) {
@@ -2073,80 +2153,108 @@
   // Build the base joined video (baseName), composite overlays frame-by-frame
   // onto a canvas (matched to the preview via resolveOverlay), capture with
   // MediaRecorder, then mux with the mixed audio via ffmpeg.
-  async function compositeOverlays(ff, baseName, W, H, fps) {
+  async function compositeOverlays(ff, baseName, videoName, W, H, fps) {
     const total = totalDuration();
     const s = H / Math.max(1, (previewFrame && previewFrame.clientHeight) || H);
     const baseData = ff.FS('readFile', baseName);
-    const baseUrl = URL.createObjectURL(new Blob([baseData.buffer], { type: 'video/mp4' }));
+    const baseUrl = URL.createObjectURL(new Blob([baseData], { type: 'video/mp4' }));
     const baseVid = document.createElement('video');
-    baseVid.src = baseUrl; baseVid.muted = true; baseVid.playsInline = true;
+    baseVid.muted = baseVid.playsInline = true;
+    const media = Object.create(null);
+    let stream, recorder, frame, deadline;
     try {
-      await new Promise((res, rej) => { baseVid.onloadedmetadata = res; baseVid.onerror = rej; });
-    } catch (e) {
-      try { URL.revokeObjectURL(baseUrl); } catch (ignore) {}
-      throw e;
-    }
-    try { await baseVid.play(); } catch(e) { try { URL.revokeObjectURL(baseUrl); } catch(ignore) {} throw new Error('Unable to start source video for overlay export.'); }
-
-    const media = {};
-    const preloads = [];
-    overlays.forEach(ov => {
-      if (ov.type === 'image' && ov.url) {
-        const img = new Image(); img.src = ov.url; media[ov.id] = img;
-        preloads.push(new Promise(r => { img.onload = r; img.onerror = r; }));
-      } else if (ov.type === 'video' && ov.url) {
-        const v = document.createElement('video'); v.src = ov.url; v.muted = true; v.playsInline = true; v.preload = 'auto';
-        media[ov.id] = v;
-        preloads.push(new Promise(r => { v.onloadedmetadata = r; v.onerror = r; }));
+      const preloads = [loadRenderMedia(baseVid, baseUrl, 'loadeddata')];
+      for (const overlay of overlays) {
+        if (!overlay.url || !['image', 'video'].includes(overlay.type)) continue;
+        const isImage = overlay.type === 'image';
+        const node = isImage ? new Image() : document.createElement('video');
+        if (!isImage) {
+          node.muted = node.playsInline = true;
+          node.preload = 'auto';
+        }
+        media[overlay.id] = node;
+        preloads.push(loadRenderMedia(node, overlay.url, isImage ? 'load' : 'loadeddata'));
       }
+      await Promise.all(preloads);
+
+      const canvas = document.createElement('canvas');
+      canvas.width = W;
+      canvas.height = H;
+      const ctx = canvas.getContext('2d');
+      stream = canvas.captureStream(fps);
+      const formats = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
+      const mimeType = formats.find(format => MediaRecorder.isTypeSupported(format));
+      if (!mimeType) throw new Error('This browser does not support WebM recording.');
+      recorder = new MediaRecorder(stream, { mimeType });
+      const chunks = [];
+      const recorded = new Promise((resolve, reject) => {
+        recorder.ondataavailable = ({ data }) => { if (data.size) chunks.push(data); };
+        recorder.onstop = resolve;
+        recorder.onerror = event => reject(event.error || new Error('Overlay recording failed.'));
+      });
+      ctx.drawImage(baseVid, 0, 0, W, H);
+      drawOverlays(ctx, W, H, 0, s, media);
+      await baseVid.play();
+      recorder.start();
+
+      const render = new Promise((resolve, reject) => {
+        baseVid.onended = resolve;
+        baseVid.onerror = () => reject(new Error('The source video stopped decoding.'));
+        deadline = setTimeout(() => reject(new Error('Overlay rendering timed out. Keep this tab open.')), (total + 15) * 1000);
+        function tick() {
+          const time = baseVid.currentTime;
+          if (baseVid.ended || time >= total) {
+            resolve();
+            return;
+          }
+          try {
+            ctx.drawImage(baseVid, 0, 0, W, H);
+            drawOverlays(ctx, W, H, time, s, media);
+            frame = requestAnimationFrame(tick);
+          } catch (error) {
+            reject(error);
+          }
+        }
+        frame = requestAnimationFrame(tick);
+      });
+      await Promise.race([render, recorded]);
+      if (recorder.state !== 'inactive') recorder.stop();
+      await recorded;
+      if (!chunks.length) throw new Error('The overlay recording is empty.');
+      const vidFile = await fetchFile(new Blob(chunks, { type: mimeType }));
+      ff.FS('writeFile', videoName, vidFile);
+    } finally {
+      clearTimeout(deadline);
+      cancelAnimationFrame(frame);
+      if (recorder && recorder.state !== 'inactive') recorder.stop();
+      stream?.getTracks().forEach(track => track.stop());
+      baseVid.pause();
+      baseVid.removeAttribute('src');
+      baseVid.load();
+      URL.revokeObjectURL(baseUrl);
+    }
+  }
+
+  function loadRenderMedia(node, url, event) {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(fail, 15000);
+      function fail() {
+        clearTimeout(timer);
+        reject(new Error('An overlay or the source video could not be loaded.'));
+      }
+      node.addEventListener(event, () => { clearTimeout(timer); resolve(); }, { once: true });
+      node.addEventListener('error', fail, { once: true });
+      node.src = url;
     });
-    await Promise.all(preloads);
-
-    const canvas = document.createElement('canvas'); canvas.width = W; canvas.height = H;
-    const ctx = canvas.getContext('2d');
-    const stream = canvas.captureStream(fps);
-    const mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9') ? 'video/webm;codecs=vp9'
-               : MediaRecorder.isTypeSupported('video/webm;codecs=vp8') ? 'video/webm;codecs=vp8'
-               : 'video/webm';
-    const rec = new MediaRecorder(stream, { mimeType: mime });
-    const chunks = [];
-    rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
-    const recDone = new Promise(res => { rec.onstop = res; });
-    rec.start();
-
-    await new Promise((resolve) => {
-      let stopped = false;
-      const finish = () => { if (!stopped) { stopped = true; try { rec.stop(); } catch (e) {} resolve(); } };
-      baseVid.onended = finish;
-      const tick = () => {
-        const vt = baseVid.currentTime;
-        if (baseVid.ended || vt >= total) { finish(); return; }
-        try {
-          ctx.drawImage(baseVid, 0, 0, W, H);
-          drawOverlays(ctx, W, H, vt, s, media);
-        } catch (e) {}
-        requestAnimationFrame(tick);
-      };
-      requestAnimationFrame(tick);
-    });
-    await recDone;
-    const vidFile = await fetchFile(new Blob(chunks, { type: rec.mimeType || 'video/webm' }));
-    ff.FS('writeFile', 'rec.webm', vidFile);
-
-    const outName = 'output.mp4';
-    const muxArgs = ['-i', 'rec.webm', '-i', baseName,
-      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
-      '-map', '0:v:0', '-map', '1:a:0?', '-c:a', 'copy', '-shortest', outName];
-    await ff.run(...muxArgs);
-    ['rec.webm'].forEach(n => { try { ff.FS('unlink', n); } catch (e) {} });
-    try { URL.revokeObjectURL(baseUrl); } catch(e) {}
-    return outName;
   }
 
   downloadLink.addEventListener('click', () => {
+    const downloadedUrl = exportObjectUrl;
     setTimeout(() => {
+      if (exportObjectUrl !== downloadedUrl) return;
       resultWrap.classList.remove('active');
-      if (exportObjectUrl) { try { URL.revokeObjectURL(exportObjectUrl); } catch (e) {} exportObjectUrl = null; }
+      if (downloadedUrl) URL.revokeObjectURL(downloadedUrl);
+      exportObjectUrl = null;
     }, 5000);
   });
 

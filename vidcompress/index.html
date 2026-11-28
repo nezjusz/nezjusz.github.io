@@ -3,12 +3,13 @@
 <head>
     <script src="coi-serviceworker.js"></script>
     <meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' blob: 'wasm-unsafe-eval' 'sha256-l04KeLINnCkjf07NdLWCWqwX492X8GltLuop562xgr4='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' blob:; worker-src 'self' blob:; base-uri 'none'; object-src 'none'">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>vidcompress // Local Video Compressor</title>
     <link rel="icon" type="image/png" href="favicon.ico">
 
     <!-- Tailwind CSS (utility layer) -->
-    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.3"></script>
+    <link rel="stylesheet" href="utilities.css">
 
     <!-- Fonts: Space Grotesk for display, IBM Plex Mono for data / labels -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -17,6 +18,7 @@
 
     <!-- Local FFmpeg script -->
     <script src="./ffmpeg.min.js"></script>
+    <script src="media-utils.js"></script>
 
     <style>
         :root {
@@ -615,24 +617,27 @@
             // so the warning (or its absence) reflects the new file right away.
             updateSizeWarning(file);
 
-            // Read duration via a throwaway <video> element
-            const videoEl = document.createElement('video');
-            videoEl.preload = 'metadata';
-            videoEl.src = URL.createObjectURL(file);
-            videoEl.onloadedmetadata = () => {
-                videoDurationSec = videoEl.duration;
-                fileDetailsText.innerText = `${(file.size / (1024 * 1024)).toFixed(1)} MB · ${Math.floor(videoDurationSec / 60)}:${String(Math.floor(videoDurationSec % 60)).padStart(2, '0')}`;
-                // Recheck now that duration is available, in case the clip
-                // is long even though the file size alone was fine.
-                updateSizeWarning(file, videoDurationSec);
-                URL.revokeObjectURL(videoEl.src);
-            };
+            videoDurationSec = 0;
+            fileDetailsText.textContent = 'Reading video metadata…';
+            compressBtn.disabled = true;
+            readVideoDuration(file).then(duration => {
+                if (selectedFile !== file) return;
+                videoDurationSec = duration;
+                const minutes = Math.floor(duration / 60);
+                const seconds = String(Math.floor(duration % 60)).padStart(2, '0');
+                fileDetailsText.textContent = (file.size / (1024 * 1024)).toFixed(1) + ' MB · ' + minutes + ':' + seconds;
+                updateSizeWarning(file, duration);
+                compressBtn.disabled = false;
+            }).catch(error => {
+                if (selectedFile === file) fileDetailsText.textContent = error.message;
+            });
 
             fileNameText.innerText = file.name;
             uploadView.classList.add('hidden');
             processView.classList.remove('hidden');
 
             // Reset view state for a fresh file
+            releaseDownload(downloadBtn);
             downloadBtn.classList.add('hidden');
             compressBtn.classList.remove('hidden');
             progressContainer.classList.add('hidden');
@@ -640,6 +645,7 @@
         }
 
         resetBtn.addEventListener('click', () => {
+            releaseDownload(downloadBtn);
             selectedFile = null;
             videoDurationSec = 0;
             fileInput.value = '';
@@ -690,7 +696,7 @@
                 alert('The compression engine is still loading — try again in a moment.');
                 return;
             }
-            if (!selectedFile || videoDurationSec === 0) return;
+            if (!selectedFile || !(videoDurationSec > 0)) return;
             if (customSizeBtn.classList.contains('is-selected') && !(parseFloat(customSizeInput.value) > 0)) {
                 alert('Enter a target size in MB first.');
                 customSizeInput.focus();
@@ -698,6 +704,7 @@
             }
 
             compressBtn.disabled = true;
+            resetBtn.disabled = true;
             sizeControls.classList.add('opacity-40', 'pointer-events-none');
             progressContainer.classList.remove('hidden');
             progressBar.style.width = '0%';
@@ -726,8 +733,6 @@
                 videoBitrateK = Math.floor(totalTargetBitrateK * 0.85);
             }
 
-            ffmpeg.FS('writeFile', inputName, await fetchFile(selectedFile));
-
             // Advanced settings: frame rate, resolution and encode speed.
             // Keyframes are held to roughly one every 2 seconds regardless
             // of the chosen frame rate.
@@ -745,6 +750,7 @@
             }
 
             try {
+                ffmpeg.FS('writeFile', inputName, await fetchFile(selectedFile));
                 // Single-pass encode: force one video + one audio stream and
                 // apply the chosen frame rate / resolution / encode speed.
                 // Metadata (GPS location, device model, timestamps) is
@@ -756,7 +762,7 @@
                     '-map', '0:a:0?',
                 ];
                 if (removeMetadata) {
-                    ffmpegArgs.push('-map_metadata', '-1');
+                    ffmpegArgs.push('-map_metadata', '-1', '-map_metadata:s', '-1', '-map_chapters', '-1');
                 }
                 ffmpegArgs.push(
                     '-b:v', `${videoBitrateK}k`,
@@ -794,11 +800,11 @@
                 alert('Something went wrong during compression. Try a different file or target size, or try using another web browser.');
                 compressBtn.disabled = false;
             } finally {
+                compressBtn.disabled = false;
+                resetBtn.disabled = false;
+                sizeControls.classList.remove('opacity-40', 'pointer-events-none');
                 // Clean up the virtual filesystem so memory doesn't build up across runs
-                try {
-                    ffmpeg.FS('unlink', inputName);
-                    ffmpeg.FS('unlink', outputName);
-                } catch (e) {}
+                removeWorkingFiles(ffmpeg, inputName, outputName);
             }
         });
     </script>

@@ -3,12 +3,13 @@
 <head>
     <script src="coi-serviceworker.js"></script>
     <meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' blob: 'wasm-unsafe-eval' 'sha256-SjKJ3SNre62+hNySaVZQzoR8xcdqRvpMX8PaesWkKsQ='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' blob:; worker-src 'self' blob:; base-uri 'none'; object-src 'none'">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>vidcompress // Local Video Compressor</title>
     <link rel="icon" type="image/png" href="favicon.ico">
 
     <!-- Tailwind CSS (utility layer) -->
-    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.3"></script>
+    <link rel="stylesheet" href="utilities.css">
 
     <!-- Fonts: Space Grotesk for display, IBM Plex Mono for data / labels -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -17,6 +18,7 @@
 
     <!-- Local FFmpeg script -->
     <script src="./ffmpeg.min.js"></script>
+    <script src="media-utils.js"></script>
 
     <style>
         :root {
@@ -600,12 +602,13 @@
 
         function updateCompressButtonLabel() {
             if (isProcessingBatch) return;
-            compressBtn.textContent = queue.length > 1 ? `Compress all (${queue.length})` : 'Compress video';
+            const eligible = queue.filter(item => item.status !== 'invalid' && item.status !== 'done').length;
+            compressBtn.textContent = eligible > 1 ? `Compress all (${eligible})` : 'Compress video';
         }
 
         function refreshCompressButtonState() {
             if (isProcessingBatch) return;
-            compressBtn.disabled = queue.length === 0 || queue.some(item => item.status === 'loading');
+            compressBtn.disabled = queue.length === 0 || queue.some(item => item.status === 'loading') || !queue.some(item => item.status === 'pending' || item.status === 'error');
         }
 
         // ---------- Queue rendering ----------
@@ -657,6 +660,9 @@
                     item.downloadEl.classList.remove('hidden');
                     item.downloadEl.classList.add('inline-flex', 'items-center', 'justify-center');
                     break;
+                case 'invalid':
+                    item.statusEl.textContent = 'Unreadable video';
+                    break;
                 case 'error':
                     item.statusEl.innerText = 'Failed — try again';
                     item.rowEl.classList.add('is-error');
@@ -700,17 +706,19 @@
                 queue.push(item);
                 renderQueueItem(item);
 
-                const videoEl = document.createElement('video');
-                videoEl.preload = 'metadata';
-                videoEl.src = URL.createObjectURL(file);
-                videoEl.onloadedmetadata = () => {
-                    item.duration = videoEl.duration;
+                readVideoDuration(file).then(duration => {
+                    if (!queue.includes(item)) return;
+                    item.duration = duration;
                     item.status = 'pending';
+                }).catch(() => {
+                    if (queue.includes(item)) item.status = 'invalid';
+                }).finally(() => {
+                    if (!queue.includes(item)) return;
                     updateItemStatusText(item);
-                    URL.revokeObjectURL(videoEl.src);
                     updateQueueSizeWarning();
+                    updateCompressButtonLabel();
                     refreshCompressButtonState();
-                };
+                });
             });
 
             updateQueueCount();
@@ -725,6 +733,7 @@
         }
 
         resetBtn.addEventListener('click', () => {
+            if (isProcessingBatch) return;
             queue.forEach(item => {
                 if (item.downloadUrl) URL.revokeObjectURL(item.downloadUrl);
             });
@@ -845,9 +854,8 @@
                 vfParts.push(`fps=${chosenFps}`);
             }
 
-            ffmpeg.FS('writeFile', inputName, await fetchFile(item.file));
-
             try {
+                ffmpeg.FS('writeFile', inputName, await fetchFile(item.file));
                 // Target bitrate math: convert target size to bits, hold back
                 // 3% for container overhead, then split between video and audio.
                 const targetSizeBits = (selectedTargetSizeMB * 1024 * 1024 * 8) * 0.97;
@@ -871,7 +879,7 @@
                     '-map', '0:a:0?',
                 ];
                 if (removeMetadata) {
-                    ffmpegArgs.push('-map_metadata', '-1');
+                    ffmpegArgs.push('-map_metadata', '-1', '-map_metadata:s', '-1', '-map_chapters', '-1');
                 }
                 ffmpegArgs.push(
                     '-b:v', `${videoBitrateK}k`,
@@ -905,10 +913,7 @@
                 item.status = 'error';
             } finally {
                 // Clean up the virtual filesystem so memory doesn't build up across runs
-                try {
-                    ffmpeg.FS('unlink', inputName);
-                    ffmpeg.FS('unlink', outputName);
-                } catch (e) {}
+                removeWorkingFiles(ffmpeg, inputName, outputName);
                 updateItemStatusText(item);
             }
         }
@@ -934,21 +939,28 @@
 
             const pending = queue.filter(item => item.status === 'pending' || item.status === 'error');
             let fileIndex = 0;
-            for (const item of pending) {
-                fileIndex++;
-                await compressQueueItem(item, fileIndex, pending.length);
+            resetBtn.disabled = true;
+            try {
+                for (const item of pending) {
+                    fileIndex++;
+                    await compressQueueItem(item, fileIndex, pending.length);
+                }
+            } finally {
+                isProcessingBatch = false;
+                resetBtn.disabled = false;
+                sizeControls.classList.remove('opacity-40', 'pointer-events-none');
+                refreshCompressButtonState();
             }
-
-            isProcessingBatch = false;
-            sizeControls.classList.remove('opacity-40', 'pointer-events-none');
 
             const doneCount = queue.filter(item => item.status === 'done').length;
             const failCount = queue.filter(item => item.status === 'error').length;
+            const invalidCount = queue.filter(item => item.status === 'invalid').length;
             progressBar.style.width = '100%';
             progressPercent.innerText = '100%';
-            progressText.innerText = failCount > 0
-                ? `Done — ${doneCount} ready, ${failCount} failed`
-                : `Done — ${doneCount} file${doneCount === 1 ? '' : 's'} ready`;
+            const summary = [`${doneCount} ready`];
+            if (failCount) summary.push(`${failCount} failed`);
+            if (invalidCount) summary.push(`${invalidCount} unreadable`);
+            progressText.innerText = 'Done — ' + summary.join(', ');
 
             if (failCount > 0) {
                 compressBtn.textContent = `Retry failed (${failCount})`;

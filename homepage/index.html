@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'sha256-KquDUBGOUj+7Egxmv1sn6I0id2JQ4dfrD1Gi2C7ldCc='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' https://api.open-meteo.com; worker-src 'self' blob:; base-uri 'none'; object-src 'none'">
   <meta name="robots" content="noindex">
   <meta name="theme-color" content="#f8f8f8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -124,7 +125,7 @@
 
       <section class="modal-section">
         <h3 class="section-title">Weather</h3>
-        <p class="section-hint">Enter your coordinates to show the current weather. Leave both empty to hide it.</p>
+        <p class="section-hint">Coordinates are sent to Open-Meteo for the forecast. Leave both fields empty to hide the weather.</p>
         <div class="add-link-row">
           <input id="weatherLat" class="add-link-input" type="number" step="any" placeholder="Latitude" />
           <input id="weatherLon" class="add-link-input" type="number" step="any" placeholder="Longitude" />
@@ -297,7 +298,7 @@
         <input id="setupLat" class="add-link-input" type="number" step="any" placeholder="Latitude" />
         <input id="setupLon" class="add-link-input" type="number" step="any" placeholder="Longitude" />
       </div>
-      <p class="section-hint">Leave empty to skip — you can set it later from the settings.</p>
+      <p class="section-hint">Coordinates are sent to Open-Meteo for the forecast. Leave both fields empty to skip this step.</p>
     </section>
 
     <section class="setup-step" data-step="5">
@@ -345,14 +346,22 @@ function escapeHtml(s) {
   return s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+function readSetting(key, values, fallback) {
+  const value = localStorage.getItem(key);
+  return values.includes(value) ? value : fallback;
+}
+
+const THEMES = ['light', 'dark'];
+const BACKGROUNDS = ['default', 'auto', 'dusk', 'ocean', 'sunset'];
+const TIME_FORMATS = ['12', '24'];
+
 /* ---- Theme ---- */
 function applyTheme(theme) {
   document.body.classList.toggle('dark', theme === 'dark');
   document.querySelector('meta[name="theme-color"]').setAttribute('content', theme === 'dark' ? '#14171c' : '#f8f8f8');
 }
 
-const savedTheme = localStorage.getItem('theme');
-let theme = savedTheme || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+let theme = readSetting('theme', THEMES, window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
 applyTheme(theme);
 document.querySelector(`input[name="theme"][value="${theme}"]`).checked = true;
 
@@ -398,7 +407,7 @@ function applySky() {
   orb.style.top = (h >= 0 ? 62 - h * 50 : 62 + h * 50) + '%';
 }
 
-const savedBg = localStorage.getItem('background') || 'default';
+const savedBg = readSetting('background', BACKGROUNDS, 'default');
 applyBackground(savedBg);
 document.querySelector(`input[name="background"][value="${savedBg}"]`).checked = true;
 
@@ -410,7 +419,7 @@ document.querySelectorAll('input[name="background"]').forEach(radio => {
 });
 
 /* ---- Time ---- */
-let timeFormat = localStorage.getItem('timeFormat') || '24';
+let timeFormat = readSetting('timeFormat', TIME_FORMATS, '24');
 document.querySelector(`input[name="timeFormat"][value="${timeFormat}"]`).checked = true;
 
 document.querySelectorAll('input[name="timeFormat"]').forEach(radio => {
@@ -553,18 +562,19 @@ function renderLinks() {
     a.href = link.url;
     a.className = 'link-card';
     const def = DEFAULT_LINKS.find(d => d.url === link.url);
-    let iconHtml;
+    const label = document.createElement('span');
+    label.className = 'link-text';
+    label.textContent = link.name;
     if (def) {
-      iconHtml = def.svg.replace('<svg', '<svg class="link-icon"');
+      a.innerHTML = def.svg.replace('<svg', '<svg class="link-icon" aria-hidden="true"');
     } else {
-      try {
-        const domain = new URL(link.url).hostname;
-        iconHtml = `<img class="link-icon" src="https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64" alt="">`;
-      } catch (e) {
-        iconHtml = `<span class="link-icon letter-icon">${escapeHtml(link.name.charAt(0).toUpperCase() || '?')}</span>`;
-      }
+      const icon = document.createElement('span');
+      icon.className = 'link-icon letter-icon';
+      icon.setAttribute('aria-hidden', 'true');
+      icon.textContent = link.name.charAt(0).toUpperCase() || '?';
+      a.appendChild(icon);
     }
-    a.innerHTML = iconHtml + `<span class="link-text">${escapeHtml(link.name)}</span>`;
+    a.appendChild(label);
     grid.appendChild(a);
   });
 }
@@ -574,7 +584,7 @@ function renderManageList() {
   ul.innerHTML = '';
   getLinks().forEach((link, i) => {
     const li = document.createElement('li');
-    li.innerHTML = `<span class="manage-name">${escapeHtml(link.name)}</span>` + `<button type="button" class="remove-link-btn" data-index="${i}" aria-label="Remove ${escapeHtml(link.name)}">Ă—</button>`;
+    li.innerHTML = `<span class="manage-name">${escapeHtml(link.name)}</span>` + `<button type="button" class="remove-link-btn" data-index="${i}" aria-label="Remove ${escapeHtml(link.name)}">×</button>`;
     ul.appendChild(li);
   });
 }
@@ -693,15 +703,15 @@ function showDataMessage(msg, isError) {
 }
 
 function applyImportedSettings() {
-  theme = localStorage.getItem('theme') || theme;
+  theme = readSetting('theme', THEMES, theme);
   applyTheme(theme);
   document.querySelector(`input[name="theme"][value="${theme}"]`).checked = true;
 
-  const bg = localStorage.getItem('background') || 'default';
+  const bg = readSetting('background', BACKGROUNDS, 'default');
   applyBackground(bg);
   document.querySelector(`input[name="background"][value="${bg}"]`).checked = true;
 
-  timeFormat = localStorage.getItem('timeFormat') || '24';
+  timeFormat = readSetting('timeFormat', TIME_FORMATS, '24');
   document.querySelector(`input[name="timeFormat"][value="${timeFormat}"]`).checked = true;
 
   const importedEngineRaw = localStorage.getItem('searchEngine');
@@ -739,6 +749,11 @@ document.getElementById('importBtn').addEventListener('click', () => {
 document.getElementById('importFile').addEventListener('change', (e) => {
   const file = e.target.files[0];
   if (!file) return;
+  if (file.size > 1024 * 1024) {
+    showDataMessage('Settings file is too large.', true);
+    e.target.value = '';
+    return;
+  }
   const reader = new FileReader();
   reader.onload = () => {
     try {
@@ -755,8 +770,12 @@ document.getElementById('importFile').addEventListener('change', (e) => {
       applyImportedSettings();
       showDataMessage('Settings imported.');
     } catch (err) {
-      showDataMessage('Invalid file — nothing was changed.', true);
+      showDataMessage('Settings could not be fully imported.', true);
     }
+    e.target.value = '';
+  };
+  reader.onerror = () => {
+    showDataMessage('Settings file could not be read.', true);
     e.target.value = '';
   };
   reader.readAsText(file);

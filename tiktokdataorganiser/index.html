@@ -2,9 +2,11 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'sha256-fY8w2zZl9/65vf2BpNswFehcbHxXvamhShYK8+wjaBs='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; base-uri 'none'; object-src 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>TikTok Export Organizer</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.2/jszip.min.js"></script>
+<script src="../vendor/jszip-3.10.2.min.js"></script>
+<script src="../vendor/zip-limits.js"></script>
 <style>
   :root{
     --bg: #0b0d10;
@@ -206,6 +208,8 @@ function setFile(f){
   goBtn.disabled = false;
   goBtn.textContent = 'Organize my data';
   summaryCard.classList.remove('show');
+  if (downloadLink.getAttribute('href')?.startsWith('blob:')) URL.revokeObjectURL(downloadLink.href);
+  downloadLink.removeAttribute('href');
 }
 
 function log(msg, cls){
@@ -224,22 +228,23 @@ function setProgress(pct){
 
 function uniqueFilename(used, rawName){
   const base = sanitize(rawName);
-  if(!used.has(base)){ used.add(base); return base; }
+  if(!used.has(base.toLowerCase())){ used.add(base.toLowerCase()); return base; }
   const dot = base.lastIndexOf('.');
   const stem = dot > 0 ? base.slice(0,dot) : base;
   const ext = dot > 0 ? base.slice(dot) : '';
   let i = 2;
   let candidate = `${stem} (${i})${ext}`;
-  while(used.has(candidate)){ i++; candidate = `${stem} (${i})${ext}`; }
-  used.add(candidate);
+  while(used.has(candidate.toLowerCase())){ i++; candidate = `${stem} (${i})${ext}`; }
+  used.add(candidate.toLowerCase());
   return candidate;
 }
 
 function sanitize(name){
-  return String(name)
-    .replace(/[:/\\?*"<>|]/g, '_')
-    .replace(/\s+$/,'')
-    .trim() || 'unnamed';
+  const cleaned = String(name)
+    .replace(/[\u0000-\u001f\u007f:/\\?*"<>|]/g, '_')
+    .trim().slice(0, 160).replace(/[. ]+$/, '');
+  if (!cleaned) return 'unnamed';
+  return /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(cleaned) ? '_' + cleaned : cleaned;
 }
 
 // Pull "Chat History with X:" -> "X", "Group Chat with Y:" -> "Y"
@@ -249,7 +254,7 @@ function extractName(rawKey, prefix){
 }
 
 function formatTranscript(messages, title){
-  const sorted = [...messages].sort((a,b) => {
+  const sorted = messages.filter(message => message && typeof message === 'object').sort((a,b) => {
     const da = a.Date || a.date || '';
     const db = b.Date || b.date || '';
     return da < db ? -1 : da > db ? 1 : 0;
@@ -267,21 +272,24 @@ function formatTranscript(messages, title){
 async function readJsonFromFile(file){
   if(!file || file.size > MAX_IMPORT_BYTES) throw new Error('Input file is too large.');
   if(file.name.toLowerCase().endsWith('.zip')){
-    log('Unzipping export archiveâ€¦');
-    const inputZip=await JSZip.loadAsync(file);
-    const names=Object.keys(inputZip.files||{});
-    if(names.length>MAX_ZIP_ENTRIES) throw new Error('Archive contains too many files.');
-    let jsonEntry=null;
-    inputZip.forEach((path,entry)=>{if(!entry.dir&&path.toLowerCase().endsWith('.json')&&!jsonEntry)jsonEntry=entry;});
-    if(!jsonEntry) throw new Error('No .json file found inside the uploaded .zip');
-    const size=jsonEntry?._data?.uncompressedSize;
-    if(Number.isFinite(size)&&size>MAX_JSON_CHARS*2) throw new Error('JSON entry is too large.');
-    log(`Found ${jsonEntry.name} inside archive, readingâ€¦`);
-    const text=await jsonEntry.async('string');
-    if(text.length>MAX_JSON_CHARS) throw new Error('JSON data is too large.');
-    return JSON.parse(text);
+    log('Unzipping export archive…');
+    const zip = await openBoundedZip(file, {
+      maxInputBytes: MAX_IMPORT_BYTES,
+      maxEntries: MAX_ZIP_ENTRIES,
+      maxTotalBytes: MAX_JSON_CHARS,
+    });
+    try{
+      const entries = zip.entries.filter(entry => !entry.dir && entry.name.toLowerCase().endsWith('.json'));
+      if (!entries.length) throw new Error('No .json file found inside the uploaded .zip');
+      const jsonEntry = entries.find(entry => /(?:^|\/)user_data\.json$/i.test(entry.name)) || entries[0];
+      log(`Found ${jsonEntry.name} inside archive, reading…`);
+      return JSON.parse(await (await zip.read(jsonEntry, MAX_JSON_CHARS)).text());
+    }finally{
+      zip.close();
+    }
   }
-  log('Reading JSON fileâ€¦');
+  if (file.size > MAX_JSON_CHARS) throw new Error('JSON data is too large.');
+  log('Reading JSON file…');
   const text=await file.text();
   if(text.length>MAX_JSON_CHARS) throw new Error('JSON data is too large.');
   return JSON.parse(text);
@@ -292,10 +300,13 @@ goBtn.addEventListener('click', async () => {
   goBtn.textContent = 'Working…';
   logEl.innerHTML = '';
   summaryCard.classList.remove('show');
+  if (downloadLink.getAttribute('href')?.startsWith('blob:')) URL.revokeObjectURL(downloadLink.href);
+  downloadLink.removeAttribute('href');
   setProgress(3);
 
   try {
     const data = await readJsonFromFile(selectedFile);
+    if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("Expected a TikTok export object.");
     setProgress(15);
     log('Parsed JSON successfully.', 'ok');
 
@@ -351,13 +362,14 @@ goBtn.addEventListener('click', async () => {
 
     // ---------- Everything else: Categories/<Category>/<Section>.json ----------
     const categoriesFolder = outZip.folder('Categories');
+    const usedCategoryNames = new Set();
     const entries = Object.entries(data).filter(([k]) => k !== 'Direct Message');
     let done = 0;
 
     for (const [categoryName, categoryValue] of entries){
       const usedCategoryFiles = new Set();
       if (categoryValue === null || categoryValue === undefined) continue;
-      const catFolderName = sanitize(categoryName);
+      const catFolderName = uniqueFilename(usedCategoryNames, categoryName);
       const catFolder = categoriesFolder.folder(catFolderName);
       let wroteAny = false;
 

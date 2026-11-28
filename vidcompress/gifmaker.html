@@ -3,12 +3,13 @@
 <head>
     <script src="coi-serviceworker.js"></script>
     <meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' blob: 'wasm-unsafe-eval' 'sha256-FpKcr4bpCmNqEMX0qB2xPpssYm3UKufqblUtFL+H6G4='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' blob:; worker-src 'self' blob:; base-uri 'none'; object-src 'none'">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>gifmaker // Local Video to GIF</title>
     <link rel="icon" type="image/png" href="favicon.ico">
 
     <!-- Tailwind CSS (utility layer) -->
-    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.3"></script>
+    <link rel="stylesheet" href="utilities.css">
 
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -17,6 +18,7 @@
 
     <!-- Local FFmpeg script -->
     <script src="./ffmpeg.min.js"></script>
+    <script src="media-utils.js"></script>
 
     <style>
         :root {
@@ -374,26 +376,33 @@
             if (!file.type.startsWith('video/')) return alert('Please choose a video file.');
             selectedFile = file;
 
-            const videoEl = document.createElement('video');
-            videoEl.preload = 'metadata';
-            videoEl.src = URL.createObjectURL(file);
-            videoEl.onloadedmetadata = () => {
-                videoDurationSec = videoEl.duration;
-                fileDetailsText.innerText = `${(file.size / (1024 * 1024)).toFixed(1)} MB · ${Math.floor(videoDurationSec / 60)}:${String(Math.floor(videoDurationSec % 60)).padStart(2, '0')}`;
+            videoDurationSec = 0;
+            fileDetailsText.textContent = 'Reading video metadata…';
+            convertBtn.disabled = true;
+            readVideoDuration(file).then(duration => {
+                if (selectedFile !== file) return;
+                videoDurationSec = duration;
+                const minutes = Math.floor(duration / 60);
+                const seconds = String(Math.floor(duration % 60)).padStart(2, '0');
+                fileDetailsText.textContent = (file.size / (1024 * 1024)).toFixed(1) + ' MB · ' + minutes + ':' + seconds;
                 document.getElementById('startTime').value = 0;
-                document.getElementById('endTime').value = videoDurationSec.toFixed(2);
-                URL.revokeObjectURL(videoEl.src);
-            };
+                document.getElementById('endTime').value = duration.toFixed(2);
+                convertBtn.disabled = false;
+            }).catch(error => {
+                if (selectedFile === file) fileDetailsText.textContent = error.message;
+            });
 
             fileNameText.innerText = file.name;
             uploadView.classList.add('hidden');
             processView.classList.remove('hidden');
+            releaseDownload(downloadBtn);
             downloadBtn.classList.add('hidden');
             convertBtn.classList.remove('hidden');
             progressContainer.classList.add('hidden');
         }
 
         resetBtn.addEventListener('click', () => {
+            releaseDownload(downloadBtn);
             selectedFile = null;
             fileInput.value = '';
             processView.classList.add('hidden');
@@ -402,9 +411,17 @@
 
         convertBtn.addEventListener('click', async () => {
             if (!ffmpeg.isLoaded()) return alert('Loading engine...');
-            if (!selectedFile) return;
+            if (!selectedFile || !(videoDurationSec > 0)) return;
 
+            const startT = Number(document.getElementById('startTime').value || 0);
+            const endT = Number(document.getElementById('endTime').value || videoDurationSec);
+            if (!Number.isFinite(startT) || !Number.isFinite(endT) || startT < 0 ||
+                endT <= startT || endT > videoDurationSec + 0.01) {
+                alert('Choose a valid start and end time within the video.');
+                return;
+            }
             convertBtn.disabled = true;
+            resetBtn.disabled = true;
             progressContainer.classList.remove('hidden');
             progressBar.style.width = '0%';
             progressPercent.innerText = '0%';
@@ -419,10 +436,6 @@
                 progressPercent.innerText = `${p}%`;
             });
 
-            ffmpeg.FS('writeFile', inputName, await fetchFile(selectedFile));
-
-            const startT = document.getElementById('startTime').value || "0";
-            const endT = document.getElementById('endTime').value || videoDurationSec.toString();
             const width = document.getElementById('resolutionSelect').value;
             const fps = document.getElementById('fpsSelect').value;
             const cW = document.getElementById('cropW').value;
@@ -439,9 +452,10 @@
             const filterComplex = `${vf.join(',')},split[s0][s1];[s0]palettegen=stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle`;
 
             try {
+                ffmpeg.FS('writeFile', inputName, await fetchFile(selectedFile));
                 await ffmpeg.run(
-                    '-ss', startT,
-                    '-to', endT,
+                    '-ss', String(startT),
+                    '-to', String(endT),
                     '-i', inputName,
                     '-filter_complex', filterComplex,
                     '-loop', '0',
@@ -462,10 +476,9 @@
                 alert('An error occurred during conversion.');
                 convertBtn.disabled = false;
             } finally {
-                try {
-                    ffmpeg.FS('unlink', inputName);
-                    ffmpeg.FS('unlink', outputName);
-                } catch (e) {}
+                convertBtn.disabled = false;
+                resetBtn.disabled = false;
+                removeWorkingFiles(ffmpeg, inputName, outputName);
             }
         });
     </script>

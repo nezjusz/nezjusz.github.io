@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'sha256-vuP/+cph8NDI7mbcm324u4iZoAEoO0vmaRop7IHFiX0='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; base-uri 'none'; object-src 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EPIC KEY SELLER</title>
 <link rel="icon" href="data:,">
@@ -230,24 +231,33 @@ let st={
 function save(){
   try{ localStorage.setItem(SAVE_KEY,JSON.stringify({money:st.money,keys:st.keys,sales:st.sales,lost:st.lost,best:st.best,level:st.level,upgrades:st.upgrades,prestige:st.prestige,totalEarned:st.totalEarned,streak:st.streak,lastDay:st.lastDay,stats:st.stats})); }catch(e){}
 }
+function readSaveNumber(value, fallback, max = Number.MAX_SAFE_INTEGER){
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= max ? value : fallback;
+}
 function load(){
   try{
     const d=JSON.parse(localStorage.getItem(SAVE_KEY));
     if(d){
-      st.money=d.money||0; st.keys=d.keys||6; st.sales=d.sales||0; st.lost=d.lost||0; st.best=d.best||0; st.level=d.level||1;
-      st.prestige=d.prestige||0; st.totalEarned=d.totalEarned||0;
-      if(d.stats)Object.assign(st.stats,d.stats);
-      Object.assign(st.upgrades,d.upgrades||{});
-      if(d.upgrades){
-        if(d.upgrades.booth===null)st.upgrades.booth=1;
-        if(d.upgrades.staff===null)st.upgrades.staff=1;
-        if(d.upgrades.wrestock===null)st.upgrades.wrestock=1;
+      st.money=readSaveNumber(d.money,d.money===null?300:0);
+      st.keys=Math.floor(readSaveNumber(d.keys,st.keys));
+      st.sales=Math.floor(readSaveNumber(d.sales,0));
+      st.lost=Math.floor(readSaveNumber(d.lost,0));
+      st.best=readSaveNumber(d.best,0);
+      st.level=Math.max(1,Math.floor(readSaveNumber(d.level,1)));
+      st.prestige=Math.floor(readSaveNumber(d.prestige,0));
+      st.totalEarned=readSaveNumber(d.totalEarned,0);
+      for(const key of Object.keys(st.stats)){
+        st.stats[key]=Math.floor(readSaveNumber(d.stats?.[key],0));
       }
-      if(d.money===null)st.money=300;
+      for(const key of Object.keys(st.upgrades)){
+        const stored=d.upgrades?.[key];
+        const legacy=stored===null && ['booth','staff','wrestock'].includes(key) ? 1 : 0;
+        st.upgrades[key]=Math.floor(readSaveNumber(stored,legacy,DEFS[key].max));
+      }
       const today=new Date().toISOString().slice(0,10);
       const yd=new Date(Date.now()-86400000).toISOString().slice(0,10);
       if(d.lastDay){
-        if(d.lastDay===yd)st.streak=(d.streak||0)+1;
+        if(d.lastDay===yd)st.streak=Math.floor(readSaveNumber(d.streak,0))+1;
         else if(d.lastDay!==today)st.streak=1;
       }else st.streak=1;
       st.lastDay=today;

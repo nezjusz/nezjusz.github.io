@@ -1,7 +1,7 @@
 // Module worker: hosts butterscotch.mjs (built with ENVIRONMENT=worker, so it can't run on the main thread).
 import createModule from "./butterscotch.mjs";
 
-let mod = null, keyDownPtr = 0, keyUpPtr = 0, keyCount = 0, pump = null, running = false;
+let mod = null, keyDownPtr = 0, keyUpPtr = 0, keyCount = 0, pump = null;
 const post = (type, extra = {}) => postMessage({ type, ...extra });
 
 const TICK_MS = 8;
@@ -15,7 +15,11 @@ async function start(m) {
   const offscreen = m.canvas;
   // Emscripten's pthread_create expects an object with an id + transferControlToOffscreen()
   // so it can hand the canvas to the render thread. In a worker we already hold the OffscreenCanvas.
-  const canvasShim = { id: "canvas", transferControlToOffscreen: () => offscreen };
+  const canvasShim = {
+    id: "canvas",
+    transferControlToOffscreen: () => offscreen,
+    getContext: offscreen.getContext.bind(offscreen),
+  };
   // The engine resizes the canvas through these properties – forward them or the
   // drawing buffer silently stays at the size it had when control was transferred.
   for (const dim of ["width", "height"]) {
@@ -33,7 +37,7 @@ async function start(m) {
     noInitialRun: true,
     print: (t) => post("log", { text: "[GAME] " + t }),
     printErr: (t) => post("log", { text: "[GAME-ERR] " + t }),
-    onExit: () => { running = false; post("runnerExit"); },
+    onExit: () => { stopPump(); post("runnerExit"); },
     onAbort: (what) => post("error", { text: "WASM abort: " + what }),
   });
   post("log", { text: "[WASM] module ready" });
@@ -45,12 +49,10 @@ async function start(m) {
   if (mod._mountOpfs() !== 0) throw new Error("mountOpfs failed");
   mod._setAudioSampleRate(m.sampleRate);
 
-  // Before the runner: _startRunner may not return until the session ends.
+  // The browser runner schedules its main loop and then returns to the worker.
   startAudioPump(m.audioSab, m.ringFrames, m.sampleRate);
-  running = true;
-  post("started");
   mod.ccall("startRunner", null, ["string", "string"], [m.gamePath, m.savesPath]);
-  if (running) post("runnerExit");
+  post("started");
 }
 
 function startAudioPump(sab, frames, sampleRate) {
@@ -95,11 +97,10 @@ self.onmessage = async (e) => {
     }
     else if (m.type === "stop") {
       stopPump();
-      running = false;
       if (mod) mod._stopRunner();
     }
   } catch (err) {
-    running = false;
+    stopPump();
     post("error", { text: String((err && err.stack) || err) });
   }
 };

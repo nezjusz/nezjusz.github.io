@@ -2,7 +2,8 @@
 <html lang="pl">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval' 'sha256-MWRcnACaAB3Eq4X9EQoCH7tVvuFGsOb5L/5Ny13FhQk='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; base-uri 'none'; object-src 'none'">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#000000" />
   <title>Undertale Web Player</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -16,15 +17,15 @@
     };
   </script>
   <script src="coi-serviceworker.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script src="../vendor/zip-limits.js"></script>
 </head>
 <body>
   <div id="app">
     <!-- ==== Ekran startowy / upload ==== -->
     <section id="upload-screen" class="screen active">
-      <div class="notice" role="alert">
-        <strong class="notice-title">⚠ Odtwarzacz aktualnie nie działa.</strong>
-        <span class="notice-text">Niestety — uruchomienie silnika gry nie powodzi się i strona pozostaje w trakcie naprawy. Przepraszamy za kłopoty.</span>
+      <div class="notice">
+        <strong class="notice-title">Użyj własnych plików gry</strong>
+        <span class="notice-text">Wybierz folder instalacji Undertale, aby wczytać plik data.win i ścieżki dźwiękowe. Pliki są zapisywane tylko w tej przeglądarce.</span>
       </div>
 
       <div class="logo">

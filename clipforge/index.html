@@ -1,7 +1,8 @@
 <!doctype html>
 <html lang="pl">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'sha256-ZO2ni3e6GvgR0XqjhkllbpgADRF0Urn9igdDzsSTcqw='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; base-uri 'none'; object-src 'none'"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>StoryForge</title>
 <style>
 :root{--bg:#08080c;--panel:#111119;--line:#272733;--text:#fff;--muted:#9999a8;--accent:#9b5cff}
@@ -37,8 +38,9 @@ const voiceSelect=$('voice'),ttsRate=$('ttsRate'),speakBtn=$('speakBtn'),stopSpe
 const MAX_STORY_CHARS=100000;
 const MAX_BACKGROUND_BYTES=2*1024*1024*1024;
 let voices=[];
+let exporting=false;
 let scenes=[],bg=null,bgType=null,bgURL=null,video=null,raf=0,playing=false;
-function setupCanvas(){const mobile=innerWidth<700||/Android|iPhone|iPad|iPod/i.test(navigator.userAgent);c.width=mobile?540:720;c.height=mobile?960:1280}setupCanvas();addEventListener('resize',()=>{setupCanvas();draw(0,0)});
+function setupCanvas(){const mobile=innerWidth<700||/Android|iPhone|iPad|iPod/i.test(navigator.userAgent);c.width=mobile?540:720;c.height=mobile?960:1280}setupCanvas();addEventListener('resize',()=>{if(!exporting){setupCanvas();draw(0,0)}});
 function split(t){t=t.replace(/\s+/g,' ').trim();if(!t)return[];const words=t.split(' '),out=[];let s='';for(const w of words){if((s+' '+w).trim().length>100){if(s)out.push(s.trim());s=w}else s+=(s?' ':'')+w}if(s)out.push(s.trim());return out}
 function wrap(text,max,font){ctx.font=`700 ${font}px Arial`;const out=[];let line='';for(const w of text.split(' ')){const test=line?line+' '+w:w;if(ctx.measureText(test).width>max){if(line)out.push(line);line=w}else line=test}if(line)out.push(line);return out}
 function roundRect(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath()}
@@ -55,107 +57,139 @@ if('speechSynthesis'in window){loadVoices();speechSynthesis.onvoiceschanged=load
 
 function bgDraw(){ctx.fillStyle='#08080c';ctx.fillRect(0,0,c.width,c.height);if(!bg)return;const sw=bgType==='video'?bg.videoWidth:bg.width,sh=bgType==='video'?bg.videoHeight:bg.height;if(!sw||!sh)return;const scale=fit.value==='cover'?Math.max(c.width/sw,c.height/sh):Math.min(c.width/sw,c.height/sh),w=sw*scale,h=sh*scale;ctx.drawImage(bg,(c.width-w)/2,(c.height-h)/2,w,h);ctx.fillStyle=`rgba(0,0,0,${+dim.value/100})`;ctx.fillRect(0,0,c.width,c.height)}
 function draw(i=0,p=0){bgDraw();if(!scenes.length){ctx.fillStyle='white';ctx.font='700 34px Arial';ctx.textAlign='center';ctx.fillText('Your story goes here',c.width/2,c.height/2);return}let fs=c.width<600?38:52;if(scenes[i].length>120)fs-=5;if(scenes[i].length>170)fs-=5;const lines=wrap(scenes[i],c.width-110,fs),lh=fs*1.18,bh=lines.length*lh+64,bw=c.width-70,x=(c.width-bw)/2,y=(c.height-bh)/2;let box='rgba(0,0,0,.60)',tc='#fff';if(styleInput.value==='purple')box='rgba(70,30,120,.76)';if(styleInput.value==='clean'){box='rgba(255,255,255,.9)';tc='#111'}ctx.fillStyle=box;roundRect(x,y,bw,bh,24);ctx.fill();ctx.fillStyle=tc;ctx.font=`700 ${fs}px Arial`;ctx.textAlign='center';ctx.textBaseline='middle';let yy=y+bh/2-(lines.length-1)*lh/2;for(const line of lines){ctx.fillText(line,c.width/2,yy);yy+=lh}ctx.globalAlpha=.8;ctx.font='600 18px Arial';ctx.fillText('StoryForge',c.width/2,45);ctx.globalAlpha=1;ctx.fillStyle=styleInput.value==='clean'?'#111':'#fff';ctx.globalAlpha=.8;ctx.fillRect(25,c.height-28,(c.width-50)*p,4);ctx.globalAlpha=1}
-function prepare(){if(story.value.length>MAX_STORY_CHARS){status.textContent='Tekst jest za dĹ‚ugi (maks. 100 000 znakĂłw).';return false}scenes=split(story.value);if(!scenes.length){status.textContent='Wklej tekst najpierw.';return false}return true}
-bgInput.onchange=()=>{const f=bgInput.files[0];if(!f)return;if(f.size>MAX_BACKGROUND_BYTES){status.textContent='TĹ‚o jest za duĹĽe (maks. 2 GiB).';bgInput.value='';return}if(bgURL)URL.revokeObjectURL(bgURL);bgURL=URL.createObjectURL(f);if(f.type.startsWith('video/')){bgType='video';video=document.createElement('video');video.src=bgURL;video.muted=true;video.loop=true;video.playsInline=true;video.preload='auto';video.onloadeddata=()=>{bg=video;draw(0);status.textContent='Tło wideo załadowane.'}}else{bgType='image';const im=new Image();im.onload=()=>{bg=im;draw(0);status.textContent='Tło załadowane.'};im.src=bgURL}};
+function prepare(){if(story.value.length>MAX_STORY_CHARS){status.textContent='Tekst jest za długi (maks. 100 000 znaków).';return false}scenes=split(story.value);if(!scenes.length){status.textContent='Wklej tekst najpierw.';return false}return true}
+function clearBackground(){
+  if(video){
+    video.pause();
+    video.removeAttribute('src');
+    video.load();
+  }
+  if(bgURL) URL.revokeObjectURL(bgURL);
+  bg = video = bgURL = null;
+}
+bgInput.onchange = () => {
+  const file = bgInput.files[0];
+  if(!file || exporting) return;
+  if(file.size > MAX_BACKGROUND_BYTES){
+    status.textContent = 'Tło jest za duże (maks. 2 GiB).';
+    bgInput.value = '';
+    return;
+  }
+  stop();
+  clearBackground();
+  const url = URL.createObjectURL(file);
+  bgURL = url;
+  const isVideo = file.type.startsWith('video/');
+  const media = isVideo ? document.createElement('video') : new Image();
+  const loaded = () => {
+    if(bgURL !== url) return;
+    bg = media;
+    bgType = isVideo ? 'video' : 'image';
+    if(isVideo) video = media;
+    draw();
+    if(!exporting) status.textContent = 'Tło załadowane.';
+  };
+  media.onerror = () => {
+    if(bgURL !== url) return;
+    clearBackground();
+    if(!exporting) status.textContent = 'Nie udało się odczytać tła.';
+  };
+  if(isVideo){
+    media.muted = media.loop = media.playsInline = true;
+    media.preload = 'auto';
+    media.onloadeddata = loaded;
+  }else media.onload = loaded;
+  media.src = url;
+};
 dim.oninput=()=>{dimValue.textContent=dim.value+'%';if(!playing)draw(0)};
 async function play(){if(!prepare()||playing)return;playing=true;previewBtn.disabled=true;if(video){video.currentTime=0;try{await video.play()}catch{}}const ms=+durInput.value*1000,total=ms*scenes.length,start=performance.now();const frame=now=>{if(!playing)return;const e=now-start;if(e>=total){playing=false;previewBtn.disabled=false;if(video)video.pause();draw(scenes.length-1,1);progress.style.width='100%';status.textContent='Podgląd gotowy.';return}const i=Math.min(scenes.length-1,Math.floor(e/ms));draw(i,(e%ms)/ms);progress.style.width=e/total*100+'%';status.textContent=`Scena ${i+1}/${scenes.length}`;raf=requestAnimationFrame(frame)};raf=requestAnimationFrame(frame)}
 function stop(){playing=false;cancelAnimationFrame(raf);if(video)video.pause();previewBtn.disabled=false}
 previewBtn.onclick=play;
 async function exportVideo(){
-if(!prepare())return;
-stop();
-exportBtn.disabled=true;
-previewBtn.disabled=true;
-progress.style.width='0%';
-status.textContent='Przygotowywanie…';
-
-const mobile=innerWidth<700||/Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-// Nie renderujemy ogromnego canvasu na telefonie.
-setupCanvas();
-
-const fps=mobile?20:30;
-const candidates=mobile?['video/webm;codecs=vp8','video/webm']:['video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm'];
-const mime=candidates.find(x=>MediaRecorder.isTypeSupported(x));
-if(!mime){status.textContent='Ta przeglądarka nie obsługuje WebM.';exportBtn.disabled=false;previewBtn.disabled=false;return}
-
-// Dajemy przeglądarce klatkę na odświeżenie UI przed ciężkim renderem.
-await new Promise(r=>setTimeout(r,120));
-
-if(video){
-  video.pause();
-  try{video.currentTime=0}catch{}
-  // Nie czekamy na video.play(). To potrafi blokować eksport na telefonach.
-  try{const p=video.play();if(p&&p.catch)p.catch(()=>{})}catch{}
-}
-
-const stream=c.captureStream(fps);
-const recorder=new MediaRecorder(stream,{mimeType,videoBitsPerSecond:mobile?2200000:6500000});
-const chunks=[];
-let recorderError=null;
-recorder.ondataavailable=e=>{if(e.data&&e.data.size)chunks.push(e.data)};
-recorder.onerror=e=>{recorderError=e.error||new Error('MediaRecorder error')};
-const stopped=new Promise(resolve=>recorder.onstop=resolve);
-
-try{
-  recorder.start(250);
-}catch(e){
-  status.textContent='Nie udało się uruchomić eksportu.';
-  exportBtn.disabled=false;previewBtn.disabled=false;return;
-}
-
-status.textContent='Renderowanie 0%';
-await new Promise(resolve=>{
-  const ms=+durInput.value*1000;
-  const total=Math.max(ms*scenes.length,1000);
-  const start=performance.now();
-  let lastPaint=0;
-  const loop=now=>{
-    const elapsed=now-start;
-    if(elapsed>=total){
-      draw(scenes.length-1,1);
-      progress.style.width='100%';
-      status.textContent='Renderowanie 100%';
-      resolve();
-      return;
+  if(exporting || !prepare()) return;
+  const frameTime = Number(durInput.value) * 1000;
+  const total = frameTime * scenes.length;
+  if(total > 5 * 60 * 1000){
+    status.textContent = 'Eksport może trwać do 5 minut. Skróć tekst lub czas sceny.';
+    return;
+  }
+  stop();
+  exporting = true;
+  const controls = [story,bgInput,styleInput,durInput,dim,fit,previewBtn,exportBtn,clearBtn,speakBtn,stopSpeakBtn];
+  const wasDisabled = controls.map(control => control.disabled);
+  controls.forEach(control => { control.disabled = true; });
+  if('speechSynthesis' in window) speechSynthesis.cancel();
+  progress.style.width = '0%';
+  status.textContent = 'Przygotowywanie…';
+  let stream, recorder, timer, frame;
+  try{
+    if(typeof MediaRecorder === 'undefined' || typeof c.captureStream !== 'function'){
+      throw new Error('Ta przeglądarka nie obsługuje nagrywania obrazu.');
     }
-    const i=Math.min(scenes.length-1,Math.floor(elapsed/ms));
-    const p=(elapsed%ms)/ms;
-    draw(i,p);
-    // Nie aktualizujemy DOM co każdą klatkę — na telefonie powoduje to przycięcia.
-    if(now-lastPaint>120){
-      const pct=Math.floor(elapsed/total*100);
-      progress.style.width=pct+'%';
-      status.textContent=`Renderowanie ${pct}%`;
-      lastPaint=now;
+    setupCanvas();
+    const mobile = c.width === 540;
+    const formats = mobile ? ['video/webm;codecs=vp8','video/webm'] :
+      ['video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm'];
+    const mimeType = formats.find(type => MediaRecorder.isTypeSupported(type));
+    if(!mimeType) throw new Error('Ta przeglądarka nie obsługuje WebM.');
+    if(video){
+      video.currentTime = 0;
+      await video.play();
     }
-    requestAnimationFrame(loop);
-  };
-  requestAnimationFrame(loop);
-});
 
-if(video)video.pause();
-await new Promise(r=>setTimeout(r,80));
-recorder.stop();
-await stopped;
-
-if(recorderError||!chunks.length){
-  status.textContent='Eksport nie powiódł się. Spróbuj ponownie.';
-  exportBtn.disabled=false;previewBtn.disabled=false;return;
-}
-
-const blob=new Blob(chunks,{type:mime});
-const url=URL.createObjectURL(blob);
-const a=document.createElement('a');
-a.href=url;
-a.download='storyforge-short.webm';
-document.body.appendChild(a);a.click();a.remove();
-setTimeout(()=>URL.revokeObjectURL(url),5000);
-status.textContent='✅ Gotowe — film pobrany.';
-progress.style.width='100%';
-exportBtn.disabled=false;
-previewBtn.disabled=false;
+    stream = c.captureStream(mobile ? 20 : 30);
+    recorder = new MediaRecorder(stream,{mimeType,videoBitsPerSecond:mobile ? 2200000 : 6500000});
+    const chunks = [];
+    const recorded = new Promise((resolve,reject) => {
+      recorder.ondataavailable = event => { if(event.data.size) chunks.push(event.data); };
+      recorder.onerror = event => reject(event.error || new Error('Nagrywanie zostało przerwane.'));
+      recorder.onstop = resolve;
+    });
+    const render = new Promise((resolve,reject) => {
+      const started = performance.now();
+      timer = setTimeout(() => reject(new Error('Przekroczono czas renderowania. Pozostaw kartę na wierzchu.')), total + 15000);
+      const drawFrame = now => {
+        try{
+          const elapsed = Math.min(now - started,total);
+          const i = Math.min(scenes.length-1,Math.floor(elapsed/frameTime));
+          draw(i,elapsed === total ? 1 : elapsed % frameTime / frameTime);
+          const pct = Math.floor(elapsed / total * 100);
+          progress.style.width = pct + '%';
+          status.textContent = 'Renderowanie ' + pct + '%';
+          if(elapsed < total) frame = requestAnimationFrame(drawFrame);
+          else resolve();
+        }catch(error){ reject(error); }
+      };
+      frame = requestAnimationFrame(drawFrame);
+    });
+    recorder.start(250);
+    await Promise.race([render,recorded]);
+    if(recorder.state !== 'inactive') recorder.stop();
+    await recorded;
+    if(!chunks.length) throw new Error('Nagranie jest puste.');
+    const url = URL.createObjectURL(new Blob(chunks,{type:recorder.mimeType}));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'storyforge-short.webm';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url),5000);
+    progress.style.width = '100%';
+    status.textContent = 'Film gotowy do pobrania.';
+  }catch(error){
+    status.textContent = error.message || 'Eksport nie powiódł się.';
+  }finally{
+    clearTimeout(timer);
+    cancelAnimationFrame(frame);
+    if(recorder && recorder.state !== 'inactive') recorder.stop();
+    stream?.getTracks().forEach(track => track.stop());
+    video?.pause();
+    controls.forEach((control,index) => { control.disabled = wasDisabled[index]; });
+    exporting = false;
+  }
 }
 exportBtn.onclick=exportVideo;
-clearBtn.onclick=()=>{stop();if(video){try{video.pause();video.removeAttribute('src');video.load()}catch{}}story.value='';bgInput.value='';scenes=[];bg=null;video=null;if(bgURL)URL.revokeObjectURL(bgURL);bgURL=null;progress.style.width='0';status.textContent='Wklej tekst i uruchom podgląd.';draw()};
+clearBtn.onclick=()=>{if(exporting)return;stop();clearBackground();story.value='';bgInput.value='';scenes=[];progress.style.width='0';status.textContent='Wklej tekst i uruchom podgląd.';draw()};
 story.oninput=()=>{if(!playing){prepare();draw(0)}};styleInput.onchange=()=>!playing&&draw(0);fit.onchange=()=>!playing&&draw(0);draw();
 </script></body></html>

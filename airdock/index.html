@@ -2,11 +2,12 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'sha256-vrYwieQ1dAHYaGfKcMknI/SlVIeKADJvLJ+vdYTRdCg='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' https://0.peerjs.com wss://0.peerjs.com; worker-src 'self' blob:; base-uri 'none'; object-src 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Airdock — Send files</title>
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.5/peerjs.min.js" crossorigin="anonymous"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="../vendor/peerjs-1.5.5.min.js"></script>
+<script src="../vendor/qrcode-1.0.0.min.js"></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap');
 
@@ -417,7 +418,7 @@
       </div>
     </div>
     <h1>Send files, no app required</h1>
-    <p>Files move straight from your device to theirs over an encrypted peer‑to‑peer link. Nothing is uploaded to a server, nothing to install — just open this page on both ends.</p>
+    <p>Send files up to 256 MiB over encrypted WebRTC. Open Airdock on both devices, then approve the pairing and each file.</p>
 
     <div class="mode-toggle">
       <button id="tabSend" class="active">Send</button>
@@ -472,8 +473,7 @@
 </main>
 
 <footer>
-  Transfers happen over a direct <b>WebRTC</b> connection between browsers — files never touch a third‑party server.<br>
-  A public relay is used only to help two devices find each other; if a direct link can't form, traffic may briefly pass through a TURN relay, still end‑to‑end.
+  PeerJS Cloud helps browsers find each other. If WebRTC needs a TURN relay, the relay carries encrypted traffic.
 </footer>
 
 <div class="toast" id="toast"></div>
@@ -493,18 +493,20 @@
   const toastEl = $('toast');
 
   const CHUNK_SIZE = 64 * 1024;
-  const MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024;
+  const MAX_FILE_SIZE = 256 * 1024 * 1024;
   const MAX_ACTIVE_TRANSFERS = 3;
   const MAX_TRANSFER_ID_LENGTH = 64;
   const TRANSFER_TIMEOUT_MS = 30000;
   const INCOMING_TIMEOUT_MS = 60000;
   const COMPLETED_TRANSFER_TTL_MS = 10 * 60 * 1000;
-  const INCOMING_TOTAL_LIMIT = 768 * 1024 * 1024;
+  const INCOMING_TOTAL_LIMIT = MAX_FILE_SIZE;
   let peer = null;
   let conn = null;
+  let paired = false;
   let myCode = '';
   let queuedFiles = [];
-  let incomingMeta = {}; // transferId -> {name,size,received,chunks,url,completed,timer,lastActivity}
+  const incomingMeta = Object.create(null);
+  const responses = new Map();
   let incomingTotalBytes = 0;
   let sending = false;
 
@@ -528,8 +530,7 @@
 
   function isValidFileMeta(msg){
     return msg && typeof msg.name === 'string' && msg.name.length > 0 && msg.name.length <= 255 &&
-      typeof msg.size === 'number' && Number.isSafeInteger(msg.size) && msg.size >= 0 && msg.size <= MAX_FILE_SIZE &&
-      (msg.mime == null || (typeof msg.mime === 'string' && msg.mime.length <= 255));
+      Number.isSafeInteger(msg.size) && msg.size >= 0 && msg.size <= MAX_FILE_SIZE;
   }
 
   function armIncomingTimeout(id, ttl){
@@ -551,8 +552,10 @@
     if(!Object.keys(incomingMeta).length) receiveEmpty.style.display = '';
   }
 
-  function abortAllIncomingTransfers(){
-    Object.keys(incomingMeta).forEach(abortIncomingTransfer);
+  function abortUnfinishedTransfers(){
+    for(const [id, transfer] of Object.entries(incomingMeta)){
+      if(!transfer.completed) abortIncomingTransfer(id);
+    }
   }
 
   function setStatus(state, text){    statusDot.className = 'dot' + (state ? ' ' + state : '');
@@ -578,17 +581,16 @@
     peer.on('open', id => {
       myCode = code;
       myIdEl.innerHTML = code.slice(0,4) + '<span class="dash">·</span>' + code.slice(4);
-      setStatus('live', 'ready on this network');
+      setStatus('live', 'ready to pair');
       radarSweep.classList.remove('paused');
       renderQR(code);
       checkHash();
-      if(peerInput.value && peerInput.value !== myCode) setTimeout(doConnect, 50);
     });
 
     peer.on('connection', c => {
       // incoming connection from a sender
-      if(conn && conn.open){ c.close(); return; }
-      setupConnection(c);
+      if(conn){ c.close(); return; }
+      setupConnection(c, true);
     });
 
     peer.on('error', err => {
@@ -647,6 +649,7 @@
   });
 
   function doConnect(){
+    if(conn) return;
     const code = peerInput.value.trim().toUpperCase();
     if(code.length < 8){ toast('Enter an 8-character code'); return; }
     if(code === myCode){ toast('Cannot connect to your own device code'); return; }
@@ -654,19 +657,15 @@
     connectBtn.disabled = true;
     connectBtn.textContent = 'Connecting…';
     const c = peer.connect('airdock-' + code, { reliable: true });
-    let settled = false;
-    c.on('open', () => { settled = true; setupConnection(c); });
-    setTimeout(() => {
-      if(!settled){
-        connectBtn.disabled = false;
-        connectBtn.textContent = 'Connect';
-      }
-    }, 6000);
+    setupConnection(c, false);
   }
 
-  function setupConnection(c){
-    if(conn) { try{conn.close();}catch(e){} }
+  function setupConnection(c, incoming){
     conn = c;
+    const pairingTimer = setTimeout(() => {
+      disconnect();
+      c.close();
+    }, 30000);
     connectSection.style.display = 'none';
     connBanner.style.display = 'flex';
 
@@ -677,7 +676,7 @@
     const dot = document.createElement('span');
     dot.className = 'dot live';
     const label = document.createElement('span');
-    label.textContent = 'Connected to ';
+    label.textContent = incoming ? 'Pairing request from ' : 'Waiting for approval from ';
     const peerLabel = document.createElement('b');
     peerLabel.textContent = otherCode;
     who.append(dot,label,peerLabel);
@@ -687,48 +686,82 @@
     discBtn.textContent = 'disconnect';
     discBtn.addEventListener('click', () => c.close());
     connBanner.append(who,discBtn);
+    if(incoming){
+      const accept = document.createElement('button');
+      accept.className = 'disconnect-btn';
+      accept.type = 'button';
+      accept.textContent = 'Accept pairing';
+      accept.disabled = !c.open;
+      c.on('open', () => { accept.disabled = false; });
+      accept.addEventListener('click', () => {
+        if(conn !== c || !c.open) return;
+        try { c.send({type:'paired'}); }
+        catch { disconnect(); c.close(); return; }
+        accept.remove();
+        completePairing();
+      });
+      connBanner.insertBefore(accept,discBtn);
+    }
 
-    dropzone.classList.remove('disabled');
-    dzSub.textContent = 'Drop files here, or click to browse';
-    connectBtn.disabled = false;
-    connectBtn.textContent = 'Connect';
+    function completePairing(){
+      clearTimeout(pairingTimer);
+      paired = true;
+      label.textContent = 'Connected to ';
+      dropzone.classList.remove('disabled');
+      dzSub.textContent = 'Drop files here, or click to browse';
+      radarBlip.classList.remove('show');
+      void radarBlip.offsetWidth;
+      radarBlip.classList.add('show');
+      radarSweep.classList.add('paused');
+      setStatus('live', 'peer connected');
+    }
 
-    radarBlip.classList.remove('show');
-    void radarBlip.offsetWidth;
-    radarBlip.classList.add('show');
-    radarSweep.classList.add('paused');
-    setStatus('live', 'peer connected');
-
-    c.on('data', handleData);
-    c.on('close', () => {
+    c.on('data', msg => {
+      if(conn !== c) return;
+      if(!paired){
+        if(!incoming && msg?.type === 'paired') completePairing();
+        return;
+      }
+      handleData(c, msg);
+    });
+    function disconnect(){
+      if(conn !== c) return;
+      clearTimeout(pairingTimer);
+      for(const settle of responses.values()) settle(false);
+      responses.clear();
+      paired = false;
       connBanner.style.display = 'none';
       connectSection.style.display = 'block';
       dropzone.classList.add('disabled');
       dzSub.textContent = 'Connect to a device above to enable sending';
-      abortAllIncomingTransfers();
+      abortUnfinishedTransfers();
       conn = null;
+      connectBtn.disabled = false;
+      connectBtn.textContent = 'Connect';
       radarSweep.classList.remove('paused');
-      setStatus('live', 'ready on this network');
+      setStatus('live', 'ready to pair');
       toast('Disconnected');
-    });
-    c.on('error', err => { console.error(err); toast('Connection error'); });
+    }
+    c.on('close', disconnect);
+    c.on('error', err => { console.error(err); disconnect(); c.close(); });
   }
   // ---------- Sending ----------
-  dropzone.addEventListener('click', () => { if(conn) fileInput.click(); });
-  dropzone.addEventListener('dragover', e => { e.preventDefault(); if(conn) dropzone.classList.add('drag'); });
+  dropzone.addEventListener('click', () => { if(paired && !sending) fileInput.click(); });
+  dropzone.addEventListener('dragover', e => { e.preventDefault(); if(paired && !sending) dropzone.classList.add('drag'); });
   dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag'));
   dropzone.addEventListener('drop', e => {
     e.preventDefault();
     dropzone.classList.remove('drag');
-    if(!conn) return;
+    if(!paired || sending) return;
     addFiles(e.dataTransfer.files);
   });
   fileInput.addEventListener('change', () => { addFiles(fileInput.files); fileInput.value=''; });
 
   function addFiles(fileListObj){
+    if(!paired || sending) return;
     const allFiles = Array.from(fileListObj);
     const rejected = allFiles.filter(f => f && f.size > MAX_FILE_SIZE).length;
-    if(rejected) toast(rejected === 1 ? 'One file is too large' : rejected + ' files are too large');
+    if(rejected) toast('Files larger than 256 MiB were skipped');
     const files = allFiles.filter(f => f && typeof f.name === 'string' && f.name.length <= 255 && Number.isSafeInteger(f.size) && f.size <= MAX_FILE_SIZE);
     files.forEach(f => {
       const id = 'f_' + (crypto?.randomUUID ? crypto.randomUUID().replace(/-/g,'').slice(0,24) : Math.random().toString(36).slice(2,26));
@@ -757,125 +790,171 @@
     });
     sendList.querySelectorAll('.file-remove').forEach(btn => {
       btn.addEventListener('click', () => {
+        if(sending) return;
         queuedFiles = queuedFiles.filter(q => q.id !== btn.dataset.id);
         renderSendList();
       });
     });
   }
 
-  clearBtn.addEventListener('click', () => { queuedFiles = []; renderSendList(); });
+  clearBtn.addEventListener('click', () => { if(!sending){ queuedFiles = []; renderSendList(); } });
 
   sendBtn.addEventListener('click', async () => {
-    if(!conn || !conn.open || sending) return;
+    if(!paired || !conn?.open || sending) return;
+    const activeConnection = conn;
     sending = true;
     sendBtn.disabled = true;
     sendBtn.textContent = 'Sending…';
-    for(const item of queuedFiles){
-      if(item.status === 'done') continue;
-      await sendFile(item);
+    try{
+      for(const item of queuedFiles){
+        if(item.status === 'done') continue;
+        await sendFile(activeConnection, item);
+      }
+    }finally{
+      sendBtn.disabled = false;
+      sendBtn.textContent = 'Send files';
+      sending = false;
     }
-    sendBtn.disabled = false;
-    sendBtn.textContent = 'Send files';
-    sending = false;
     const failed = queuedFiles.filter(item => item.status === 'error').length;
     toast(failed ? failed + ' file(s) failed' : 'All files sent');
   });
 
-  function sendFile(item){
-    return new Promise((resolve) => {
-      const {id,file}=item;
-      const statusEl=$('status_'+id), fillEl=$('fill_'+id);
-      if(!file || file.size > MAX_FILE_SIZE){ if(statusEl) statusEl.textContent='too large'; item.status='error'; resolve(false); return; }
-      if(!conn || !conn.open){ if(statusEl) statusEl.textContent='disconnected'; item.status='error'; resolve(false); return; }
-      statusEl.textContent='0%';
-      try { conn.send({type:'meta',id,name:file.name,size:file.size,mime:file.type||'application/octet-stream'}); }
-      catch(e){ statusEl.textContent='failed'; item.status='error'; resolve(false); return; }
-      const reader=new FileReader();
-      let offset=0, settled=false, timeoutId=null;
-      const finish=(ok,label)=>{
-        if(settled)return; settled=true;
-        if(timeoutId)clearTimeout(timeoutId);
-        reader.onload=null; reader.onerror=null; reader.onabort=null;
-        if(!ok){ statusEl.textContent=label||'failed'; item.status='error'; }
-        resolve(ok);
-      };
-      const arm=()=>{ if(timeoutId)clearTimeout(timeoutId); timeoutId=setTimeout(()=>finish(false,'timed out'),TRANSFER_TIMEOUT_MS); };
-      const readSlice=(o)=>{
-        if(settled)return;
-        if(!conn || !conn.open){ finish(false,'disconnected'); return; }
-        try{ arm(); reader.readAsArrayBuffer(file.slice(o,o+CHUNK_SIZE)); }catch(e){ finish(false,'read error'); }
-      };
-      reader.onload=e=>{
-        const data=e?.target?.result;
-        if(settled)return;
-        if(!(data instanceof ArrayBuffer)||data.byteLength>CHUNK_SIZE){finish(false,'invalid chunk');return;}
-        if(!conn||!conn.open){finish(false,'disconnected');return;}
-        try{conn.send({type:'chunk',id,data});}catch(err){finish(false,'connection error');return;}
-        offset+=data.byteLength;
-        const pct=file.size===0?100:Math.min(100,Math.round(offset/file.size*100));
-        fillEl.style.width=pct+'%'; statusEl.textContent=pct+'%';
-        if(offset<file.size){
-          if(conn.dataChannel&&conn.dataChannel.bufferedAmount>8*CHUNK_SIZE)setTimeout(()=>readSlice(offset),30);
-          else readSlice(offset);
-        }else{
-          try{conn.send({type:'done',id});}catch(err){finish(false,'connection error');return;}
-          statusEl.textContent='sent'; statusEl.classList.add('ok'); item.status='done'; finish(true);
-        }
-      };
-      reader.onerror=()=>finish(false,'read error');
-      reader.onabort=()=>finish(false,'cancelled');
-      if(file.size===0){ try{conn.send({type:'done',id});statusEl.textContent='sent';statusEl.classList.add('ok');item.status='done';finish(true);}catch(e){finish(false,'connection error');} }
-      else readSlice(0);
+  function waitForResponse(c, message, expectedType, timeout){
+    return new Promise(resolve => {
+      const key = expectedType + ':' + message.id;
+      const timer = setTimeout(() => settle(false), timeout);
+      function settle(accepted){
+        clearTimeout(timer);
+        responses.delete(key);
+        resolve(accepted);
+      }
+      responses.set(key, settle);
+      try { c.send(message); } catch { settle(false); }
     });
   }
+
+  async function sendFile(c, item){
+    const {file} = item;
+    const id = crypto.randomUUID();
+    const statusEl = $('status_' + item.id);
+    const fillEl = $('fill_' + item.id);
+    const checkConnection = () => {
+      if(c !== conn || !c.open || !paired) throw new Error('disconnected');
+    };
+    try{
+      checkConnection();
+      statusEl.textContent = 'awaiting approval';
+      fillEl.style.width = '0%';
+      if(!await waitForResponse(c, {type:'meta',id,name:file.name,size:file.size}, 'offer', INCOMING_TIMEOUT_MS)){
+        throw new Error('offer declined or expired');
+      }
+      for(let offset = 0; offset < file.size; offset += CHUNK_SIZE){
+        const deadline = Date.now() + TRANSFER_TIMEOUT_MS;
+        while(c.dataChannel?.bufferedAmount > 8 * CHUNK_SIZE){
+          checkConnection();
+          if(Date.now() > deadline) throw new Error('send timed out');
+          await new Promise(resolve => setTimeout(resolve, 30));
+        }
+        const data = await file.slice(offset, offset + CHUNK_SIZE).arrayBuffer();
+        checkConnection();
+        c.send({type:'chunk',id,data});
+        const progress = Math.round((offset + data.byteLength) / file.size * 100) + '%';
+        fillEl.style.width = progress;
+        statusEl.textContent = progress;
+      }
+      checkConnection();
+      if(!await waitForResponse(c, {type:'done',id}, 'receipt', TRANSFER_TIMEOUT_MS)){
+        throw new Error('delivery not confirmed');
+      }
+      fillEl.style.width = '100%';
+      statusEl.textContent = 'sent';
+      statusEl.classList.add('ok');
+      item.status = 'done';
+    }catch(error){
+      statusEl.textContent = error.message || 'failed';
+      item.status = 'error';
+      if(c === conn && c.open){
+        try { c.send({type:'cancel',id}); } catch {}
+      }
+    }
+  }
   // ---------- Receiving ----------
-  function handleData(msg){
+  function handleData(c, msg){
     if(!msg||typeof msg!=='object'||typeof msg.type!=='string')return;
+    if(!isValidTransferId(msg.id)) return;
+    if(msg.type === 'offer' || msg.type === 'receipt'){
+      responses.get(msg.type + ':' + msg.id)?.(msg.accepted === true);
+      return;
+    }
+    if(msg.type === 'cancel'){
+      const current = incomingMeta[msg.id];
+      if(current && !current.completed) abortIncomingTransfer(msg.id);
+      return;
+    }
+    function reply(type, accepted){
+      try { c.send({type,id:msg.id,accepted}); } catch {}
+    }
     if(msg.type==='meta'){
-      if(!isValidTransferId(msg.id)||!isValidFileMeta(msg))return;
-      if(incomingMeta[msg.id])abortIncomingTransfer(msg.id);
-      if(Object.keys(incomingMeta).length>=MAX_ACTIVE_TRANSFERS){toast('Too many active transfers');return;}
-      if(incomingTotalBytes + msg.size > INCOMING_TOTAL_LIMIT){toast('Receiver memory limit reached');return;}
-      incomingMeta[msg.id]={name:msg.name,size:msg.size,mime:msg.mime,chunks:[],received:0,url:null,completed:false,timer:null,lastActivity:Date.now()};
+      if(!isValidFileMeta(msg) || incomingMeta[msg.id] ||
+         Object.keys(incomingMeta).length >= MAX_ACTIVE_TRANSFERS ||
+         incomingTotalBytes + msg.size > INCOMING_TOTAL_LIMIT){
+        reply('offer', false);
+        return;
+      }
+      const transfer = {name:msg.name,size:msg.size,chunks:[],received:0,url:null,accepted:false,completed:false,timer:null};
+      incomingMeta[msg.id] = transfer;
       incomingTotalBytes += msg.size;
       armIncomingTimeout(msg.id, INCOMING_TIMEOUT_MS);
-      switchTab('receive'); renderReceiveRow(msg.id); return;
+      switchTab('receive');
+      renderReceiveRow(msg.id, accepted => {
+        if(c !== conn || incomingMeta[msg.id] !== transfer) return;
+        if(accepted){
+          transfer.accepted = true;
+          armIncomingTimeout(msg.id, INCOMING_TIMEOUT_MS);
+        }else abortIncomingTransfer(msg.id);
+        reply('offer', accepted);
+      });
+      return;
     }
     if(msg.type==='chunk'){
-      if(!isValidTransferId(msg.id))return;
-      const m=incomingMeta[msg.id]; if(!m||m.completed)return;
-      const chunk = msg.data instanceof ArrayBuffer
-        ? msg.data
-        : (ArrayBuffer.isView(msg.data)
-          ? msg.data.buffer.slice(msg.data.byteOffset, msg.data.byteOffset + msg.data.byteLength)
-          : null);
-      if(!chunk || chunk.byteLength===0 || chunk.byteLength>CHUNK_SIZE){abortIncomingTransfer(msg.id);toast('Invalid transfer chunk');return;}
-      if(m.received+chunk.byteLength>m.size){abortIncomingTransfer(msg.id);toast('Transfer exceeded declared size');return;}
+      const m=incomingMeta[msg.id]; if(!m?.accepted||m.completed)return;
+      const expected = Math.min(CHUNK_SIZE, m.size - m.received);
+      const binary = msg.data instanceof ArrayBuffer || ArrayBuffer.isView(msg.data);
+      if(!binary || !expected || msg.data.byteLength !== expected){
+        abortIncomingTransfer(msg.id); toast('Invalid transfer chunk'); return;
+      }
+      const chunk = msg.data instanceof ArrayBuffer ? msg.data :
+        msg.data.buffer.slice(msg.data.byteOffset, msg.data.byteOffset + msg.data.byteLength);
       m.chunks.push(chunk); m.received+=chunk.byteLength;
-      m.lastActivity = Date.now();
       armIncomingTimeout(msg.id, INCOMING_TIMEOUT_MS);
       const pct=m.size===0?100:Math.min(100,Math.round(m.received/m.size*100));
       const fill=$('rfill_'+msg.id), status=$('rstatus_'+msg.id);
       if(fill)fill.style.width=pct+'%'; if(status)status.textContent=pct+'%'; return;
     }
     if(msg.type==='done'){
-      if(!isValidTransferId(msg.id))return;
-      const m=incomingMeta[msg.id]; if(!m||m.completed)return;
-      if(m.received!==m.size){abortIncomingTransfer(msg.id);toast('Incomplete transfer rejected');return;}
-      const blob=new Blob(m.chunks,{type:m.mime||'application/octet-stream'});
+      const m=incomingMeta[msg.id];
+      if(!m?.accepted || m.completed || m.received !== m.size){
+        reply('receipt', false);
+        if(m && !m.completed) abortIncomingTransfer(msg.id);
+        return;
+      }
+      const blob=new Blob(m.chunks,{type:'application/octet-stream'});
       m.chunks=[]; m.url=URL.createObjectURL(blob); m.completed=true;
       armIncomingTimeout(msg.id, COMPLETED_TRANSFER_TTL_MS);
       const status=$('rstatus_'+msg.id);
       if(status){
         const link=document.createElement('a');
         link.className='download-link'; link.href=m.url; link.download=m.name; link.textContent='Download';
-        link.addEventListener('click',()=>setTimeout(()=>{ if(m.timer) clearTimeout(m.timer); try{URL.revokeObjectURL(m.url)}catch(e){} incomingTotalBytes=Math.max(0,incomingTotalBytes-(m.size||0)); delete incomingMeta[msg.id]; if(!Object.keys(incomingMeta).length)receiveEmpty.style.display='';},1000),{once:true});
+        link.addEventListener('click',()=>setTimeout(()=>{
+          if(incomingMeta[msg.id] === m) abortIncomingTransfer(msg.id);
+        },1000),{once:true});
         status.replaceWith(link);
       }
       toast('Received '+m.name);
+      reply('receipt', true);
     }
   }
-  function renderReceiveRow(id){
+  function renderReceiveRow(id, answer){
     if(!isValidTransferId(id))return;
     receiveEmpty.style.display='none';
     const m=incomingMeta[id]; if(!m)return;
@@ -887,7 +966,18 @@
     const progress=document.createElement('div'); progress.className='file-progress';
     const fill=document.createElement('div'); fill.className='file-progress-fill'; fill.id='rfill_'+id;
     progress.appendChild(fill); meta.append(name,sub,progress);
-    const status=document.createElement('div'); status.className='file-status'; status.id='rstatus_'+id; status.textContent='0%';
+    const status=document.createElement('div'); status.className='file-status'; status.id='rstatus_'+id;
+    for(const accepted of [true, false]){
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'disconnect-btn';
+      button.textContent = accepted ? 'Accept file' : 'Decline';
+      button.addEventListener('click', () => {
+        status.textContent = accepted ? '0%' : 'Declined';
+        answer(accepted);
+      });
+      status.appendChild(button);
+    }
     row.append(icon,meta,status); receiveList.appendChild(row);
   }
   function fileSvg(){
@@ -899,15 +989,11 @@
 
   // ---------- Auto-connect via URL hash ----------
   function checkHash(){
-    const m = location.hash.match(/c=([A-Z0-9]{8})/i);
-    if(m){
-      const codeFromUrl = m[1].toUpperCase();
-      if(codeFromUrl !== myCode){
-        peerInput.value = codeFromUrl;
-      }
-    }
+    const code = new URLSearchParams(location.hash.slice(1)).get('c')?.toUpperCase();
+    if(code && /^[A-Z0-9]{8}$/.test(code) && code !== myCode) peerInput.value = code;
   }
 
+  addEventListener('hashchange', checkHash);
   initPeer();
 })();
 </script>
